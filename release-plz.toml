@@ -1,0 +1,9 @@
+[workspace]
+# Create a GitHub release for each new version
+git_release_enable = true
+
+# Update the changelog
+changelog_update = true
+
+# PR labels
+pr_labels = ["release"]
