@@ -116,3 +116,118 @@ async fn test_multi() {
     let result = client.misc().multi(&actions).await.unwrap();
     assert_eq!(result.len(), 2);
 }
+
+#[tokio::test]
+async fn test_sync() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "sync",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let result = client.misc().sync().await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_export_package() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(&server, "exportPackage", mock_anki_response(true)).await;
+
+    let result = client
+        .misc()
+        .export_package("Default", "/tmp/deck.apkg", Some(true))
+        .await
+        .unwrap();
+    assert!(result);
+}
+
+#[tokio::test]
+async fn test_import_package() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(&server, "importPackage", mock_anki_response(true)).await;
+
+    let result = client
+        .misc()
+        .import_package("/tmp/deck.apkg")
+        .await
+        .unwrap();
+    assert!(result);
+}
+
+#[tokio::test]
+async fn test_reload_collection() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "reloadCollection",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let result = client.misc().reload_collection().await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_api_reflect() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "apiReflect",
+        mock_anki_response(serde_json::json!({
+            "scopes": ["actions", "scopes"],
+            "actions": ["deckNames", "modelNames", "addNote"]
+        })),
+    )
+    .await;
+
+    let result = client.misc().api_reflect(&["actions"], None).await.unwrap();
+    assert!(!result.actions.is_empty());
+    assert!(result.actions.contains(&"deckNames".to_string()));
+}
+
+#[tokio::test]
+async fn test_multi_with_params() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "multi",
+        mock_anki_response(vec![
+            serde_json::json!(["Default"]),
+            serde_json::json!([1234567890_i64]),
+        ]),
+    )
+    .await;
+
+    let actions = vec![
+        yanki::actions::MultiAction::new("deckNames"),
+        yanki::actions::MultiAction::with_params(
+            "findNotes",
+            serde_json::json!({"query": "deck:Default"}),
+        ),
+    ];
+
+    let result = client.misc().multi(&actions).await.unwrap();
+    assert_eq!(result.len(), 2);
+}

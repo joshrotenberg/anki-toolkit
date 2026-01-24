@@ -62,7 +62,10 @@ pub use client::{AnkiClient, ClientBuilder};
 pub use error::{Error, Result};
 pub use types::{
     CanAddResult, CardAnswer, CardInfo, CardModTime, CardTemplate, CreateModelParams, DeckConfig,
-    DeckStats, DuplicateScope, Ease, FieldFont, FindReplaceParams, MediaAttachment, ModelField,
-    ModelStyling, Note, NoteBuilder, NoteField, NoteInfo, NoteModTime, NoteOptions,
-    StoreMediaParams,
+    DeckStats, DuplicateScope, Ease, FieldFont, FindReplaceParams, LapseConfig, MediaAttachment,
+    ModelField, ModelStyling, NewCardConfig, Note, NoteBuilder, NoteField, NoteInfo, NoteModTime,
+    NoteOptions, ReviewConfig, StoreMediaParams,
 };
+
+// Re-export types from actions module
+pub use actions::{MultiAction, ReviewEntry};
