@@ -1,21 +1,24 @@
-[package]
-name = "yanki"
-version = "0.1.0"
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-description = "Complete async Rust client for the AnkiConnect API"
-repository = "https://github.com/joshrotenberg/yanki"
-keywords = ["anki", "flashcards", "spaced-repetition", "ankiconnect", "api-client"]
-categories = ["api-bindings", "asynchronous"]
+repository = "https://github.com/joshrotenberg/ankit"
 
-[dependencies]
+[workspace.dependencies]
+ankit = { path = "crates/ankit" }
+ankit-engine = { path = "crates/ankit-engine" }
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-
-[dev-dependencies]
 wiremock = "0.6"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
+rmcp = { version = "0.8", features = ["server", "transport-io"] }
+schemars = "0.8"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

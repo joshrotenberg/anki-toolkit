@@ -1,0 +1,25 @@
+[package]
+name = "ankit-mcp"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MCP server for Anki deck management via AnkiConnect"
+keywords = ["anki", "mcp", "model-context-protocol", "flashcards"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "ankit-mcp"
+path = "src/main.rs"
+
+[dependencies]
+ankit-engine.workspace = true
+rmcp.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std"] }
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
