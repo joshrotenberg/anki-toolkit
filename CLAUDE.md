@@ -11,7 +11,7 @@ Rust toolkit for Anki deck management via AnkiConnect. Four crates in a workspac
 
 ## Current Status
 
-All crates complete and passing tests (129 integration + 88 doctests = 217 total).
+All crates complete and passing tests (139 integration + 88 doctests = 227 total).
 
 ## MCP Server Tools (46 total)
 
@@ -138,6 +138,7 @@ After restart, test these scenarios:
 - `crates/ankit-builder/src/lib.rs` - TOML deck builder
 - `crates/ankit-builder/src/schema.rs` - TOML schema types
 - `crates/ankit-builder/src/apkg.rs` - .apkg file generation
+- `crates/ankit-builder/src/markdown.rs` - Markdown/HTML conversion
 - `.mcp.json` - Local MCP config for testing
 
 ## Architecture Patterns
@@ -310,6 +311,50 @@ let result = builder.import_connect().await?;
 - Stable ID generation from names (deterministic)
 - Media file support with manifest
 - Full validation before generation
+- Markdown field conversion (bidirectional)
+
+### Markdown Fields
+
+Models can specify `markdown_fields` to enable bidirectional Markdown/HTML conversion:
+
+```toml
+[[models]]
+name = "Vocabulary"
+fields = ["Word", "Definition", "Examples"]
+markdown_fields = ["Definition", "Examples"]  # These fields use Markdown
+```
+
+**How it works:**
+- **Push to Anki**: Markdown in `markdown_fields` is converted to HTML before sending
+- **Pull from Anki**: HTML in `markdown_fields` is converted back to Markdown
+- Non-markdown fields are left unchanged
+
+**Supported Markdown:**
+- **Bold** (`**text**`) and *italic* (`*text*`)
+- Lists (ordered and unordered)
+- Links (`[text](url)`)
+- Code blocks and inline code
+- Blockquotes
+- Strikethrough (`~~text~~`)
+
+**API:**
+```rust
+// Convert all markdown fields to HTML (before import)
+definition.markdown_to_html();
+
+// Convert HTML to markdown (after export)
+definition.html_to_markdown();
+
+// Get fields with markdown converted (for single note)
+let html_fields = note.fields_as_html(&model.markdown_fields);
+
+// Set markdown fields for a model
+definition.set_markdown_fields("Vocabulary", &["Definition", "Examples"]);
+```
+
+**Dependencies:**
+- `pulldown-cmark` for Markdown to HTML
+- `html2md` for HTML to Markdown
 
 ## Roadmap
 
