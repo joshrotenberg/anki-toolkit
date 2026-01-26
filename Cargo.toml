@@ -6,12 +6,12 @@ members = ["crates/*"]
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/joshrotenberg/ankit"
+repository = "https://github.com/joshrotenberg/anki-toolkit"
 
 [workspace.dependencies]
-ankit = { path = "crates/ankit" }
-ankit-engine = { path = "crates/ankit-engine" }
-ankit-builder = { path = "crates/ankit-builder" }
+ankit = { path = "crates/ankit", version = "0.1.0" }
+ankit-engine = { path = "crates/ankit-engine", version = "0.1.0" }
+ankit-builder = { path = "crates/ankit-builder", version = "0.1.0" }
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }
