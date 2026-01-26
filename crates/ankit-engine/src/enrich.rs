@@ -247,4 +247,228 @@ impl<'a> EnrichEngine<'a> {
         }
         Ok(())
     }
+
+    /// Create an enrichment pipeline for batch processing.
+    ///
+    /// The pipeline finds candidates and provides helpers for grouping,
+    /// updating, and committing changes.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - Query parameters specifying search filter and fields to check
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit_engine::Engine;
+    /// # use ankit_engine::enrich::EnrichQuery;
+    /// # async fn example() -> ankit_engine::Result<()> {
+    /// let engine = Engine::new();
+    ///
+    /// let query = EnrichQuery {
+    ///     search: "deck:Japanese".to_string(),
+    ///     empty_fields: vec!["Example".to_string(), "Pronunciation".to_string()],
+    /// };
+    ///
+    /// let mut pipeline = engine.enrich().pipeline(&query).await?;
+    ///
+    /// // Process by missing field for efficient batching
+    /// for (field, candidates) in pipeline.by_missing_field() {
+    ///     println!("Field '{}' needs {} notes enriched", field, candidates.len());
+    /// }
+    ///
+    /// // Buffer updates - collect IDs first to avoid borrow issues
+    /// let note_ids: Vec<i64> = pipeline.candidates().iter().map(|c| c.note_id).collect();
+    /// for note_id in note_ids {
+    ///     pipeline.update(note_id, [
+    ///         ("Example".to_string(), "Generated example".to_string())
+    ///     ].into_iter().collect());
+    /// }
+    ///
+    /// // Commit all updates
+    /// let report = pipeline.commit(&engine).await?;
+    /// println!("Updated {} notes", report.updated);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn pipeline(&self, query: &EnrichQuery) -> Result<EnrichmentPipeline> {
+        let candidates = self.find_candidates(query).await?;
+        Ok(EnrichmentPipeline::new(candidates))
+    }
+}
+
+/// A pipeline for batch enrichment operations.
+///
+/// Provides helpers for grouping candidates by missing field,
+/// buffering updates, and committing them in a single operation.
+#[derive(Debug, Clone)]
+pub struct EnrichmentPipeline {
+    candidates: Vec<EnrichCandidate>,
+    updates: HashMap<i64, HashMap<String, String>>,
+}
+
+impl EnrichmentPipeline {
+    /// Create a new pipeline with the given candidates.
+    pub fn new(candidates: Vec<EnrichCandidate>) -> Self {
+        Self {
+            candidates,
+            updates: HashMap::new(),
+        }
+    }
+
+    /// Get the candidates for enrichment.
+    pub fn candidates(&self) -> &[EnrichCandidate] {
+        &self.candidates
+    }
+
+    /// Get the number of candidates.
+    pub fn len(&self) -> usize {
+        self.candidates.len()
+    }
+
+    /// Check if there are no candidates.
+    pub fn is_empty(&self) -> bool {
+        self.candidates.is_empty()
+    }
+
+    /// Get candidates grouped by which field they're missing.
+    ///
+    /// This is useful for batch processing where you want to generate
+    /// content for all notes missing a specific field at once.
+    ///
+    /// # Returns
+    ///
+    /// A map from field name to the candidates that are missing that field.
+    /// A candidate may appear in multiple groups if it's missing multiple fields.
+    pub fn by_missing_field(&self) -> HashMap<String, Vec<&EnrichCandidate>> {
+        let mut groups: HashMap<String, Vec<&EnrichCandidate>> = HashMap::new();
+
+        for candidate in &self.candidates {
+            for field in &candidate.empty_fields {
+                groups.entry(field.clone()).or_default().push(candidate);
+            }
+        }
+
+        groups
+    }
+
+    /// Get candidates grouped by model name.
+    ///
+    /// Useful when different models need different enrichment strategies.
+    pub fn by_model(&self) -> HashMap<String, Vec<&EnrichCandidate>> {
+        let mut groups: HashMap<String, Vec<&EnrichCandidate>> = HashMap::new();
+
+        for candidate in &self.candidates {
+            groups
+                .entry(candidate.model_name.clone())
+                .or_default()
+                .push(candidate);
+        }
+
+        groups
+    }
+
+    /// Buffer an update for a note.
+    ///
+    /// Updates are not applied until `commit()` is called.
+    /// Multiple updates to the same note will be merged.
+    ///
+    /// # Arguments
+    ///
+    /// * `note_id` - The note to update
+    /// * `fields` - Field values to set
+    pub fn update(&mut self, note_id: i64, fields: HashMap<String, String>) {
+        self.updates.entry(note_id).or_default().extend(fields);
+    }
+
+    /// Get the number of buffered updates.
+    pub fn pending_updates(&self) -> usize {
+        self.updates.len()
+    }
+
+    /// Get candidates that haven't been updated yet.
+    pub fn pending_candidates(&self) -> Vec<&EnrichCandidate> {
+        self.candidates
+            .iter()
+            .filter(|c| !self.updates.contains_key(&c.note_id))
+            .collect()
+    }
+
+    /// Commit all buffered updates.
+    ///
+    /// # Arguments
+    ///
+    /// * `engine` - The engine to use for committing
+    ///
+    /// # Returns
+    ///
+    /// A report with counts of updated, failed, and skipped notes.
+    pub async fn commit(&self, engine: &crate::Engine) -> Result<EnrichPipelineReport> {
+        // Count skipped (candidates without updates)
+        let skipped = self
+            .candidates
+            .iter()
+            .filter(|c| !self.updates.contains_key(&c.note_id))
+            .count();
+
+        let mut updated = 0;
+        let mut failed = Vec::new();
+
+        // Apply updates
+        for (note_id, fields) in &self.updates {
+            match engine.enrich().update_note(*note_id, fields).await {
+                Ok(_) => updated += 1,
+                Err(e) => {
+                    failed.push((*note_id, e.to_string()));
+                }
+            }
+        }
+
+        Ok(EnrichPipelineReport {
+            updated,
+            failed,
+            skipped,
+        })
+    }
+
+    /// Commit all buffered updates and tag the updated notes.
+    ///
+    /// # Arguments
+    ///
+    /// * `engine` - The engine to use for committing
+    /// * `tag` - Tag to add to successfully updated notes
+    pub async fn commit_and_tag(
+        &self,
+        engine: &crate::Engine,
+        tag: &str,
+    ) -> Result<EnrichPipelineReport> {
+        let report = self.commit(engine).await?;
+
+        // Tag successfully updated notes
+        if report.updated > 0 {
+            let updated_ids: Vec<i64> = self
+                .updates
+                .keys()
+                .filter(|id| !report.failed.iter().any(|(fid, _)| fid == *id))
+                .copied()
+                .collect();
+
+            if !updated_ids.is_empty() {
+                engine.enrich().tag_enriched(&updated_ids, tag).await?;
+            }
+        }
+
+        Ok(report)
+    }
+}
+
+/// Report from an enrichment pipeline commit.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct EnrichPipelineReport {
+    /// Number of notes successfully updated.
+    pub updated: usize,
+    /// Notes that failed to update (note_id, error message).
+    pub failed: Vec<(i64, String)>,
+    /// Number of candidates that were not updated (no update buffered).
+    pub skipped: usize,
 }
