@@ -59,10 +59,10 @@ pub fn markdown_to_html(markdown: &str) -> String {
 /// Convert HTML to Markdown.
 ///
 /// Best-effort conversion that handles common HTML elements:
-/// - `<b>`, `<strong>` -> **bold**
-/// - `<i>`, `<em>` -> *italic*
+/// - `<b>`, `<strong>` -> `**bold**`
+/// - `<i>`, `<em>` -> `*italic*`
 /// - `<ul>`, `<ol>`, `<li>` -> lists
-/// - `<a>` -> [text](url)
+/// - `<a>` -> `[text](url)`
 /// - `<br>` -> newlines
 ///
 /// Note: Some HTML styling may be lost in conversion (e.g., colors, fonts).
