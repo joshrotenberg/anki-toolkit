@@ -39,6 +39,15 @@ pub struct ExportedCard {
     pub interval: i64,
     /// Due date (days since collection creation, or negative for learning).
     pub due: i64,
+    /// Ease factor (as integer, e.g., 2500 = 250%).
+    pub ease_factor: i64,
+    /// Card type (0 = new, 1 = learning, 2 = review, 3 = relearning).
+    pub card_type: i32,
+    /// Queue (-1 = suspended, -2 = sibling buried, -3 = manually buried,
+    /// 0 = new, 1 = learning, 2 = review, 3 = day learn, 4 = preview).
+    pub queue: i32,
+    /// Last modification timestamp (seconds since epoch).
+    pub mod_time: i64,
 }
 
 /// Export of deck contents.
@@ -112,6 +121,10 @@ impl<'a> ExportEngine<'a> {
                 lapses: info.lapses,
                 interval: info.interval,
                 due: info.due,
+                ease_factor: info.ease_factor,
+                card_type: info.card_type,
+                queue: info.queue,
+                mod_time: info.mod_time,
             })
             .collect();
 
