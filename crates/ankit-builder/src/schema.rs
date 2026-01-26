@@ -328,6 +328,10 @@ pub struct NoteDef {
     /// Custom GUID (auto-generated if not specified).
     #[serde(default)]
     pub guid: Option<String>,
+
+    /// Anki note ID (assigned after sync, used for tracking).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_id: Option<i64>,
 }
 
 impl NoteDef {
@@ -534,6 +538,7 @@ InvalidField = "X"
             fields,
             tags: vec![],
             guid: None,
+            note_id: None,
         };
 
         let ordered = note.fields_ordered(&model);

@@ -258,6 +258,10 @@ impl<'a> DeckSyncer<'a> {
             for note_diff in &diff.toml_only {
                 match self.push_new_note(note_diff).await {
                     Ok(note_id) => {
+                        // Update the definition with the assigned note ID
+                        self.update_note_id(&note_diff.first_field, &note_diff.model, note_id);
+                        definition_modified = true;
+
                         result.pushed.push(SyncedNote {
                             note_id,
                             first_field: note_diff.first_field.clone(),
@@ -441,6 +445,7 @@ impl<'a> DeckSyncer<'a> {
             fields,
             tags: note_info.tags,
             guid: None,
+            note_id: Some(note_id),
         };
 
         // Convert HTML to markdown for markdown fields
@@ -494,6 +499,26 @@ impl<'a> DeckSyncer<'a> {
         }
 
         Ok(())
+    }
+
+    /// Update the note_id field for a note in the definition.
+    fn update_note_id(&mut self, first_field: &str, model_name: &str, note_id: i64) {
+        for note in &mut self.definition.notes {
+            let model = self.definition.models.iter().find(|m| m.name == note.model);
+            if let Some(model) = model {
+                if let Some(first_field_name) = model.fields.first() {
+                    let note_first_field = note
+                        .fields
+                        .get(first_field_name)
+                        .cloned()
+                        .unwrap_or_default();
+                    if note_first_field == first_field && note.model == model_name {
+                        note.note_id = Some(note_id);
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     /// Update the TOML definition with Anki values for a note.
