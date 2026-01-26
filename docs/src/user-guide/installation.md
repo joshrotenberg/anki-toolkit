@@ -50,18 +50,23 @@ Options:
     -v, --verbose       Logging level (-v=info, -vv=debug, -vvv=trace)
 ```
 
-### Read-Only Mode
+### Read-Only Mode (Recommended for New Users)
 
-Use `--read-only` to prevent any modifications to your Anki collection:
+> **Important**: Without `--read-only`, the MCP server has full write access to your Anki collection. This means it can delete notes, reset learning progress, and make permanent changes.
+
+Use `--read-only` to prevent any modifications:
 
 ```bash
 ankit-mcp --read-only
 ```
 
-This is useful for:
-- Exploring decks safely
-- Demo environments
-- Shared systems where write access should be restricted
+**We recommend starting with read-only mode** until you're familiar with the tools. This lets you safely:
+- Search and explore your decks
+- View statistics and health reports
+- Find duplicates and problem cards
+- Export data
+
+When ready for write access, remove the flag. Always maintain backups of your collection (File > Export in Anki).
 
 ### HTTP Transport
 

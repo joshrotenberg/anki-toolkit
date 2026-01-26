@@ -26,6 +26,19 @@ The `ankit-mcp` server lets AI assistants (like Claude) manage your Anki decks d
 cargo install ankit-mcp
 ```
 
+### Important: Data Safety
+
+> **Warning**: By default, ankit-mcp runs in **write mode** with full access to modify your Anki collection. This includes the ability to delete notes, reset learning progress, and modify scheduling data.
+
+**To protect your data:**
+
+1. **Use read-only mode** when exploring or if unsure: `ankit-mcp --read-only`
+2. **Back up your collection** regularly via Anki's File > Export (include scheduling info)
+3. **Test with a copy** of your collection first if making bulk changes
+4. **Review operations** before confirming - ask Claude to preview changes first
+
+The authors are not responsible for any data loss. **Use at your own risk.**
+
 ### Setup with Claude Desktop
 
 Add to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json` on Linux/macOS):

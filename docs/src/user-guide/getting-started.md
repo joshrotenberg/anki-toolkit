@@ -10,6 +10,26 @@ Before you begin, make sure you have:
 2. **AnkiConnect** add-on installed in Anki
 3. **Claude Desktop** (or another MCP client)
 
+## Important: Data Safety
+
+Before you start, please understand:
+
+**Write mode (default) can permanently modify your Anki collection.** The MCP server has full access to:
+
+- Delete notes and entire decks
+- Modify card content, tags, and fields
+- Reset learning progress and statistics
+- Change card scheduling
+
+**Recommendations:**
+
+1. **Back up your collection first** - In Anki: File > Export > select "Include scheduling information"
+2. **Start with read-only mode** - Add `--read-only` flag to test safely
+3. **Review before bulk operations** - Ask Claude to preview changes first
+4. **Keep regular backups** - Anki stores backups in your profile folder
+
+The authors are not responsible for any data loss. Use at your own risk.
+
 ## Quick Setup
 
 ### 1. Install AnkiConnect
