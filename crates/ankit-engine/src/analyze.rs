@@ -574,6 +574,250 @@ impl<'a> AnalyzeEngine<'a> {
 
         Ok(report)
     }
+
+    /// Compare two decks for overlap and differences.
+    ///
+    /// Analyzes notes in both decks based on a key field, identifying:
+    /// - Notes unique to each deck
+    /// - Exact matches (identical key field values)
+    /// - Similar notes (fuzzy matching above threshold)
+    ///
+    /// # Arguments
+    ///
+    /// * `deck_a` - Name of the first deck
+    /// * `deck_b` - Name of the second deck
+    /// * `options` - Comparison options (key field and similarity threshold)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit_engine::Engine;
+    /// # use ankit_engine::analyze::CompareOptions;
+    /// # async fn example() -> ankit_engine::Result<()> {
+    /// let engine = Engine::new();
+    ///
+    /// let comparison = engine.analyze()
+    ///     .compare_decks("Japanese::Core", "Japanese::Extra", CompareOptions {
+    ///         key_field: "Front".to_string(),
+    ///         similarity_threshold: 0.85,
+    ///     })
+    ///     .await?;
+    ///
+    /// println!("Only in Core: {}", comparison.only_in_a.len());
+    /// println!("Only in Extra: {}", comparison.only_in_b.len());
+    /// println!("Exact matches: {}", comparison.exact_matches.len());
+    /// println!("Similar: {}", comparison.similar.len());
+    ///
+    /// for pair in &comparison.similar {
+    ///     println!("  {:.0}% similar: '{}' vs '{}'",
+    ///         pair.similarity * 100.0,
+    ///         pair.note_a.key_value,
+    ///         pair.note_b.key_value);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn compare_decks(
+        &self,
+        deck_a: &str,
+        deck_b: &str,
+        options: CompareOptions,
+    ) -> Result<DeckComparison> {
+        let mut comparison = DeckComparison {
+            deck_a: deck_a.to_string(),
+            deck_b: deck_b.to_string(),
+            key_field: options.key_field.clone(),
+            similarity_threshold: options.similarity_threshold,
+            ..Default::default()
+        };
+
+        // Get notes from both decks
+        let query_a = format!("deck:\"{}\"", deck_a);
+        let query_b = format!("deck:\"{}\"", deck_b);
+
+        let note_ids_a = self.client.notes().find(&query_a).await?;
+        let note_ids_b = self.client.notes().find(&query_b).await?;
+
+        if note_ids_a.is_empty() && note_ids_b.is_empty() {
+            return Ok(comparison);
+        }
+
+        // Get note info
+        let notes_a = if note_ids_a.is_empty() {
+            Vec::new()
+        } else {
+            self.client.notes().info(&note_ids_a).await?
+        };
+
+        let notes_b = if note_ids_b.is_empty() {
+            Vec::new()
+        } else {
+            self.client.notes().info(&note_ids_b).await?
+        };
+
+        // Extract key field values
+        let extract_key = |note: &ankit::NoteInfo| -> Option<(i64, String, Vec<String>)> {
+            note.fields
+                .get(&options.key_field)
+                .map(|f| (note.note_id, f.value.trim().to_string(), note.tags.clone()))
+        };
+
+        let keys_a: Vec<_> = notes_a.iter().filter_map(extract_key).collect();
+        let keys_b: Vec<_> = notes_b.iter().filter_map(extract_key).collect();
+
+        // Build lookup map for deck B (for exact matching from A)
+        let map_b: HashMap<String, (i64, Vec<String>)> = keys_b
+            .iter()
+            .map(|(id, key, tags)| (key.to_lowercase(), (*id, tags.clone())))
+            .collect();
+
+        // Track which notes have been matched
+        let mut matched_in_a: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        let mut matched_in_b: std::collections::HashSet<i64> = std::collections::HashSet::new();
+
+        // Find exact matches
+        for (note_id_a, key_a, tags_a) in &keys_a {
+            let key_lower = key_a.to_lowercase();
+            if let Some((note_id_b, tags_b)) = map_b.get(&key_lower) {
+                matched_in_a.insert(*note_id_a);
+                matched_in_b.insert(*note_id_b);
+
+                comparison.exact_matches.push((
+                    ComparisonNote {
+                        note_id: *note_id_a,
+                        key_value: key_a.clone(),
+                        tags: tags_a.clone(),
+                    },
+                    ComparisonNote {
+                        note_id: *note_id_b,
+                        key_value: key_a.clone(), // Same value
+                        tags: tags_b.clone(),
+                    },
+                ));
+            }
+        }
+
+        // Find similar matches (only for unmatched notes)
+        if options.similarity_threshold < 1.0 {
+            for (note_id_a, key_a, tags_a) in &keys_a {
+                if matched_in_a.contains(note_id_a) {
+                    continue;
+                }
+
+                for (note_id_b, key_b, tags_b) in &keys_b {
+                    if matched_in_b.contains(note_id_b) {
+                        continue;
+                    }
+
+                    let similarity = string_similarity(key_a, key_b);
+                    if similarity >= options.similarity_threshold {
+                        matched_in_a.insert(*note_id_a);
+                        matched_in_b.insert(*note_id_b);
+
+                        comparison.similar.push(SimilarPair {
+                            note_a: ComparisonNote {
+                                note_id: *note_id_a,
+                                key_value: key_a.clone(),
+                                tags: tags_a.clone(),
+                            },
+                            note_b: ComparisonNote {
+                                note_id: *note_id_b,
+                                key_value: key_b.clone(),
+                                tags: tags_b.clone(),
+                            },
+                            similarity,
+                        });
+
+                        break; // Move to next note in A
+                    }
+                }
+            }
+        }
+
+        // Collect unmatched notes
+        for (note_id_a, key_a, tags_a) in &keys_a {
+            if !matched_in_a.contains(note_id_a) {
+                comparison.only_in_a.push(ComparisonNote {
+                    note_id: *note_id_a,
+                    key_value: key_a.clone(),
+                    tags: tags_a.clone(),
+                });
+            }
+        }
+
+        for (note_id_b, key_b, tags_b) in &keys_b {
+            if !matched_in_b.contains(note_id_b) {
+                comparison.only_in_b.push(ComparisonNote {
+                    note_id: *note_id_b,
+                    key_value: key_b.clone(),
+                    tags: tags_b.clone(),
+                });
+            }
+        }
+
+        Ok(comparison)
+    }
+}
+
+/// Calculate string similarity using normalized Levenshtein distance.
+///
+/// Returns a value between 0.0 (completely different) and 1.0 (identical).
+fn string_similarity(a: &str, b: &str) -> f64 {
+    let a_lower = a.to_lowercase();
+    let b_lower = b.to_lowercase();
+
+    if a_lower == b_lower {
+        return 1.0;
+    }
+
+    if a_lower.is_empty() || b_lower.is_empty() {
+        return 0.0;
+    }
+
+    let distance = levenshtein_distance(&a_lower, &b_lower);
+    let max_len = a_lower.chars().count().max(b_lower.chars().count());
+
+    1.0 - (distance as f64 / max_len as f64)
+}
+
+/// Calculate the Levenshtein distance between two strings.
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+
+    let m = a_chars.len();
+    let n = b_chars.len();
+
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
+
+    // Use two rows instead of full matrix for memory efficiency
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr = vec![0; n + 1];
+
+    for i in 1..=m {
+        curr[0] = i;
+
+        for j in 1..=n {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+
+            curr[j] = (prev[j] + 1) // deletion
+                .min(curr[j - 1] + 1) // insertion
+                .min(prev[j - 1] + cost); // substitution
+        }
+
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[n]
 }
 
 /// Comprehensive study report combining multiple statistics.
@@ -635,6 +879,70 @@ pub struct ReportDailyStats {
     pub date: String,
     /// Number of reviews on this day.
     pub reviews: usize,
+}
+
+/// Options for comparing two decks.
+#[derive(Debug, Clone)]
+pub struct CompareOptions {
+    /// Field name to use as the comparison key (e.g., "Front").
+    pub key_field: String,
+    /// Similarity threshold for fuzzy matching (0.0 - 1.0).
+    /// Cards with similarity >= this value are considered similar.
+    /// Set to 1.0 for exact matches only.
+    pub similarity_threshold: f64,
+}
+
+impl Default for CompareOptions {
+    fn default() -> Self {
+        Self {
+            key_field: "Front".to_string(),
+            similarity_threshold: 0.9,
+        }
+    }
+}
+
+/// Result of comparing two decks.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DeckComparison {
+    /// Name of the first deck.
+    pub deck_a: String,
+    /// Name of the second deck.
+    pub deck_b: String,
+    /// Field used for comparison.
+    pub key_field: String,
+    /// Similarity threshold used.
+    pub similarity_threshold: f64,
+
+    /// Notes only in deck A (not in B).
+    pub only_in_a: Vec<ComparisonNote>,
+    /// Notes only in deck B (not in A).
+    pub only_in_b: Vec<ComparisonNote>,
+    /// Notes with exact matching key field values.
+    pub exact_matches: Vec<(ComparisonNote, ComparisonNote)>,
+    /// Notes with similar (but not exact) key field values.
+    pub similar: Vec<SimilarPair>,
+}
+
+/// A note in a comparison result.
+#[derive(Debug, Clone, Serialize)]
+pub struct ComparisonNote {
+    /// The note ID.
+    pub note_id: i64,
+    /// The value of the key field.
+    pub key_value: String,
+    /// The note's tags.
+    pub tags: Vec<String>,
+}
+
+/// A pair of similar notes from two decks.
+#[derive(Debug, Clone, Serialize)]
+pub struct SimilarPair {
+    /// Note from deck A.
+    pub note_a: ComparisonNote,
+    /// Note from deck B.
+    pub note_b: ComparisonNote,
+    /// Similarity score (0.0 - 1.0).
+    pub similarity: f64,
 }
 
 /// Retention statistics for a deck.
