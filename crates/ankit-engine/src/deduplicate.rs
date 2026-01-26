@@ -352,4 +352,147 @@ mod tests {
             "hello world"
         );
     }
+
+    #[test]
+    fn test_normalize_key_empty() {
+        assert_eq!(normalize_key(""), "");
+        assert_eq!(normalize_key("   "), "");
+        assert_eq!(normalize_key("<>"), "");
+    }
+
+    #[test]
+    fn test_normalize_key_html_attributes() {
+        assert_eq!(normalize_key("<a href=\"url\">Link</a>"), "link");
+        assert_eq!(
+            normalize_key("<div class=\"foo\" id=\"bar\">Content</div>"),
+            "content"
+        );
+    }
+
+    #[test]
+    fn test_normalize_key_unclosed_tags() {
+        assert_eq!(normalize_key("<p>Unclosed"), "unclosed");
+        assert_eq!(normalize_key("Text<br>More"), "textmore");
+    }
+
+    #[test]
+    fn test_normalize_key_newlines() {
+        assert_eq!(normalize_key("hello\nworld"), "hello world");
+        assert_eq!(normalize_key("hello\r\nworld"), "hello world");
+        assert_eq!(normalize_key("hello\tworld"), "hello world");
+    }
+
+    #[test]
+    fn test_keep_strategy_default() {
+        let strategy = KeepStrategy::default();
+        assert!(matches!(strategy, KeepStrategy::First));
+    }
+
+    #[test]
+    fn test_dedupe_query_construction() {
+        let query = DedupeQuery {
+            search: "deck:Test".to_string(),
+            key_field: "Front".to_string(),
+            keep: KeepStrategy::MostContent,
+        };
+
+        assert_eq!(query.search, "deck:Test");
+        assert_eq!(query.key_field, "Front");
+        assert!(matches!(query.keep, KeepStrategy::MostContent));
+    }
+
+    #[test]
+    fn test_duplicate_group_construction() {
+        let group = DuplicateGroup {
+            key_value: "hello".to_string(),
+            keep_note_id: 1000,
+            duplicate_note_ids: vec![1001, 1002, 1003],
+        };
+
+        assert_eq!(group.key_value, "hello");
+        assert_eq!(group.keep_note_id, 1000);
+        assert_eq!(group.duplicate_note_ids.len(), 3);
+        assert!(group.duplicate_note_ids.contains(&1001));
+    }
+
+    #[test]
+    fn test_duplicate_group_serialization() {
+        let group = DuplicateGroup {
+            key_value: "test".to_string(),
+            keep_note_id: 123,
+            duplicate_note_ids: vec![456, 789],
+        };
+
+        let json = serde_json::to_string(&group).unwrap();
+        assert!(json.contains("\"key_value\":\"test\""));
+        assert!(json.contains("\"keep_note_id\":123"));
+        assert!(json.contains("\"duplicate_note_ids\":[456,789]"));
+    }
+
+    #[test]
+    fn test_dedupe_report_default() {
+        let report = DedupeReport::default();
+        assert_eq!(report.groups_found, 0);
+        assert_eq!(report.deleted, 0);
+        assert_eq!(report.kept, 0);
+        assert!(report.details.is_empty());
+    }
+
+    #[test]
+    fn test_dedupe_report_construction() {
+        let group = DuplicateGroup {
+            key_value: "word".to_string(),
+            keep_note_id: 100,
+            duplicate_note_ids: vec![101, 102],
+        };
+
+        let report = DedupeReport {
+            groups_found: 1,
+            deleted: 2,
+            kept: 1,
+            details: vec![group],
+        };
+
+        assert_eq!(report.groups_found, 1);
+        assert_eq!(report.deleted, 2);
+        assert_eq!(report.kept, 1);
+        assert_eq!(report.details.len(), 1);
+    }
+
+    #[test]
+    fn test_dedupe_report_serialization() {
+        let report = DedupeReport {
+            groups_found: 2,
+            deleted: 5,
+            kept: 2,
+            details: vec![],
+        };
+
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("\"groups_found\":2"));
+        assert!(json.contains("\"deleted\":5"));
+        assert!(json.contains("\"kept\":2"));
+    }
+
+    #[test]
+    fn test_note_for_dedupe_construction() {
+        let note = NoteForDedupe {
+            note_id: 12345,
+            non_empty_count: 3,
+            tag_count: 2,
+        };
+
+        assert_eq!(note.note_id, 12345);
+        assert_eq!(note.non_empty_count, 3);
+        assert_eq!(note.tag_count, 2);
+    }
+
+    #[test]
+    fn test_keep_strategy_variants() {
+        // Verify all variants can be constructed
+        let _first = KeepStrategy::First;
+        let _last = KeepStrategy::Last;
+        let _most_content = KeepStrategy::MostContent;
+        let _most_tags = KeepStrategy::MostTags;
+    }
 }

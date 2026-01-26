@@ -472,3 +472,289 @@ pub struct EnrichPipelineReport {
     /// Number of candidates that were not updated (no update buffered).
     pub skipped: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_enrich_query_construction() {
+        let query = EnrichQuery {
+            search: "deck:Test".to_string(),
+            empty_fields: vec!["Example".to_string(), "Audio".to_string()],
+        };
+
+        assert_eq!(query.search, "deck:Test");
+        assert_eq!(query.empty_fields.len(), 2);
+        assert!(query.empty_fields.contains(&"Example".to_string()));
+    }
+
+    #[test]
+    fn test_enrich_candidate_construction() {
+        let mut fields = HashMap::new();
+        fields.insert("Front".to_string(), "Hello".to_string());
+        fields.insert("Back".to_string(), "World".to_string());
+
+        let candidate = EnrichCandidate {
+            note_id: 12345,
+            model_name: "Basic".to_string(),
+            fields,
+            empty_fields: vec!["Example".to_string()],
+            tags: vec!["tag1".to_string()],
+        };
+
+        assert_eq!(candidate.note_id, 12345);
+        assert_eq!(candidate.model_name, "Basic");
+        assert_eq!(candidate.fields.len(), 2);
+        assert_eq!(candidate.empty_fields.len(), 1);
+        assert_eq!(candidate.tags.len(), 1);
+    }
+
+    #[test]
+    fn test_enrich_candidate_serialization() {
+        let candidate = EnrichCandidate {
+            note_id: 100,
+            model_name: "Vocab".to_string(),
+            fields: HashMap::new(),
+            empty_fields: vec!["Definition".to_string()],
+            tags: vec![],
+        };
+
+        let json = serde_json::to_string(&candidate).unwrap();
+        assert!(json.contains("\"note_id\":100"));
+        assert!(json.contains("\"model_name\":\"Vocab\""));
+    }
+
+    #[test]
+    fn test_enrich_report_default() {
+        let report = EnrichReport::default();
+        assert_eq!(report.updated, 0);
+        assert_eq!(report.failed, 0);
+        assert!(report.failures.is_empty());
+    }
+
+    #[test]
+    fn test_enrich_report_construction() {
+        let failure = EnrichFailure {
+            note_id: 999,
+            error: "Not found".to_string(),
+        };
+
+        let report = EnrichReport {
+            updated: 5,
+            failed: 1,
+            failures: vec![failure],
+        };
+
+        assert_eq!(report.updated, 5);
+        assert_eq!(report.failed, 1);
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].note_id, 999);
+    }
+
+    #[test]
+    fn test_enrich_failure_construction() {
+        let failure = EnrichFailure {
+            note_id: 12345,
+            error: "Field not found".to_string(),
+        };
+
+        assert_eq!(failure.note_id, 12345);
+        assert_eq!(failure.error, "Field not found");
+    }
+
+    #[test]
+    fn test_enrich_failure_serialization() {
+        let failure = EnrichFailure {
+            note_id: 456,
+            error: "Connection error".to_string(),
+        };
+
+        let json = serde_json::to_string(&failure).unwrap();
+        assert!(json.contains("\"note_id\":456"));
+        assert!(json.contains("\"error\":\"Connection error\""));
+    }
+
+    #[test]
+    fn test_enrichment_pipeline_new_empty() {
+        let pipeline = EnrichmentPipeline::new(vec![]);
+        assert!(pipeline.is_empty());
+        assert_eq!(pipeline.len(), 0);
+        assert_eq!(pipeline.pending_updates(), 0);
+    }
+
+    #[test]
+    fn test_enrichment_pipeline_with_candidates() {
+        let candidate = EnrichCandidate {
+            note_id: 1,
+            model_name: "Basic".to_string(),
+            fields: HashMap::new(),
+            empty_fields: vec!["Back".to_string()],
+            tags: vec![],
+        };
+
+        let pipeline = EnrichmentPipeline::new(vec![candidate]);
+        assert!(!pipeline.is_empty());
+        assert_eq!(pipeline.len(), 1);
+        assert_eq!(pipeline.candidates().len(), 1);
+    }
+
+    #[test]
+    fn test_enrichment_pipeline_update() {
+        let candidate = EnrichCandidate {
+            note_id: 100,
+            model_name: "Basic".to_string(),
+            fields: HashMap::new(),
+            empty_fields: vec!["Back".to_string()],
+            tags: vec![],
+        };
+
+        let mut pipeline = EnrichmentPipeline::new(vec![candidate]);
+        assert_eq!(pipeline.pending_updates(), 0);
+
+        let mut fields = HashMap::new();
+        fields.insert("Back".to_string(), "Answer".to_string());
+        pipeline.update(100, fields);
+
+        assert_eq!(pipeline.pending_updates(), 1);
+    }
+
+    #[test]
+    fn test_enrichment_pipeline_update_merge() {
+        let mut pipeline = EnrichmentPipeline::new(vec![]);
+
+        let mut fields1 = HashMap::new();
+        fields1.insert("Field1".to_string(), "Value1".to_string());
+        pipeline.update(100, fields1);
+
+        let mut fields2 = HashMap::new();
+        fields2.insert("Field2".to_string(), "Value2".to_string());
+        pipeline.update(100, fields2);
+
+        // Should still be 1 update (merged)
+        assert_eq!(pipeline.pending_updates(), 1);
+    }
+
+    #[test]
+    fn test_enrichment_pipeline_pending_candidates() {
+        let candidates = vec![
+            EnrichCandidate {
+                note_id: 1,
+                model_name: "Basic".to_string(),
+                fields: HashMap::new(),
+                empty_fields: vec!["Back".to_string()],
+                tags: vec![],
+            },
+            EnrichCandidate {
+                note_id: 2,
+                model_name: "Basic".to_string(),
+                fields: HashMap::new(),
+                empty_fields: vec!["Back".to_string()],
+                tags: vec![],
+            },
+        ];
+
+        let mut pipeline = EnrichmentPipeline::new(candidates);
+        assert_eq!(pipeline.pending_candidates().len(), 2);
+
+        let mut fields = HashMap::new();
+        fields.insert("Back".to_string(), "Answer".to_string());
+        pipeline.update(1, fields);
+
+        assert_eq!(pipeline.pending_candidates().len(), 1);
+        assert_eq!(pipeline.pending_candidates()[0].note_id, 2);
+    }
+
+    #[test]
+    fn test_enrichment_pipeline_by_missing_field() {
+        let candidates = vec![
+            EnrichCandidate {
+                note_id: 1,
+                model_name: "Basic".to_string(),
+                fields: HashMap::new(),
+                empty_fields: vec!["Field1".to_string()],
+                tags: vec![],
+            },
+            EnrichCandidate {
+                note_id: 2,
+                model_name: "Basic".to_string(),
+                fields: HashMap::new(),
+                empty_fields: vec!["Field1".to_string(), "Field2".to_string()],
+                tags: vec![],
+            },
+        ];
+
+        let pipeline = EnrichmentPipeline::new(candidates);
+        let by_field = pipeline.by_missing_field();
+
+        assert_eq!(by_field.get("Field1").unwrap().len(), 2);
+        assert_eq!(by_field.get("Field2").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_enrichment_pipeline_by_model() {
+        let candidates = vec![
+            EnrichCandidate {
+                note_id: 1,
+                model_name: "Basic".to_string(),
+                fields: HashMap::new(),
+                empty_fields: vec![],
+                tags: vec![],
+            },
+            EnrichCandidate {
+                note_id: 2,
+                model_name: "Cloze".to_string(),
+                fields: HashMap::new(),
+                empty_fields: vec![],
+                tags: vec![],
+            },
+            EnrichCandidate {
+                note_id: 3,
+                model_name: "Basic".to_string(),
+                fields: HashMap::new(),
+                empty_fields: vec![],
+                tags: vec![],
+            },
+        ];
+
+        let pipeline = EnrichmentPipeline::new(candidates);
+        let by_model = pipeline.by_model();
+
+        assert_eq!(by_model.get("Basic").unwrap().len(), 2);
+        assert_eq!(by_model.get("Cloze").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_enrich_pipeline_report_default() {
+        let report = EnrichPipelineReport::default();
+        assert_eq!(report.updated, 0);
+        assert!(report.failed.is_empty());
+        assert_eq!(report.skipped, 0);
+    }
+
+    #[test]
+    fn test_enrich_pipeline_report_construction() {
+        let report = EnrichPipelineReport {
+            updated: 10,
+            failed: vec![(100, "Error".to_string())],
+            skipped: 5,
+        };
+
+        assert_eq!(report.updated, 10);
+        assert_eq!(report.failed.len(), 1);
+        assert_eq!(report.skipped, 5);
+    }
+
+    #[test]
+    fn test_enrich_pipeline_report_serialization() {
+        let report = EnrichPipelineReport {
+            updated: 3,
+            failed: vec![],
+            skipped: 2,
+        };
+
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("\"updated\":3"));
+        assert!(json.contains("\"skipped\":2"));
+    }
+}
