@@ -134,6 +134,74 @@ pub struct BulkTagReport {
     pub operation: String,
 }
 
+/// Criteria for smart suspension based on content similarity.
+#[derive(Debug, Clone)]
+pub struct SimilarityCriteria {
+    /// Similarity threshold (0.0 - 1.0). Cards with similarity >= this are grouped.
+    pub threshold: f64,
+    /// Field to compare for similarity.
+    pub field: String,
+    /// Strategy for which card to keep in each similar group.
+    pub keep_strategy: KeepStrategy,
+    /// If true, don't actually suspend - just report what would be suspended.
+    pub dry_run: bool,
+}
+
+impl Default for SimilarityCriteria {
+    fn default() -> Self {
+        Self {
+            threshold: 0.85,
+            field: "Front".to_string(),
+            keep_strategy: KeepStrategy::MostMature,
+            dry_run: false,
+        }
+    }
+}
+
+/// Strategy for which card to keep when suspending similar cards.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum KeepStrategy {
+    /// Keep the card with the highest interval (most mature).
+    #[default]
+    MostMature,
+    /// Keep the card with the lowest interval (least mature).
+    LeastMature,
+    /// Keep the card with the highest ease factor.
+    HighestEase,
+    /// Keep the card with the most reviews.
+    MostReviewed,
+}
+
+/// A group of similar cards.
+#[derive(Debug, Clone, Serialize)]
+pub struct SimilarGroup {
+    /// Card ID of the card to keep.
+    pub keep: i64,
+    /// Card IDs of cards to suspend.
+    pub suspend: Vec<i64>,
+    /// The field value these cards share (from the kept card).
+    pub field_value: String,
+    /// Similarity score within the group (minimum pairwise).
+    pub min_similarity: f64,
+}
+
+/// Report from smart suspension.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct SmartSuspendReport {
+    /// Number of cards analyzed.
+    pub cards_analyzed: usize,
+    /// Number of similar groups found.
+    pub groups_found: usize,
+    /// Number of cards suspended.
+    pub cards_suspended: usize,
+    /// Number of cards kept (one per group).
+    pub cards_kept: usize,
+    /// Details of each similar group.
+    pub groups: Vec<SimilarGroup>,
+    /// Whether this was a dry run.
+    pub dry_run: bool,
+}
+
 /// Progress management workflow engine.
 #[derive(Debug)]
 pub struct ProgressEngine<'a> {
@@ -491,4 +559,273 @@ impl<'a> ProgressEngine<'a> {
             operation: op_description,
         })
     }
+
+    /// Suspend similar cards to reduce interference during learning.
+    ///
+    /// This workflow analyzes cards for content similarity and suspends
+    /// all but one card from each group of similar cards.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - Anki search query to filter cards
+    /// * `criteria` - Similarity criteria and options
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit_engine::Engine;
+    /// # use ankit_engine::progress::{SimilarityCriteria, KeepStrategy};
+    /// # async fn example() -> ankit_engine::Result<()> {
+    /// let engine = Engine::new();
+    ///
+    /// // First do a dry run to see what would be suspended
+    /// let report = engine.progress()
+    ///     .smart_suspend("deck:Japanese", SimilarityCriteria {
+    ///         threshold: 0.85,
+    ///         field: "Front".to_string(),
+    ///         keep_strategy: KeepStrategy::MostMature,
+    ///         dry_run: true,
+    ///     })
+    ///     .await?;
+    ///
+    /// println!("Would suspend {} cards in {} groups",
+    ///     report.cards_suspended, report.groups_found);
+    ///
+    /// // Then actually suspend
+    /// let report = engine.progress()
+    ///     .smart_suspend("deck:Japanese", SimilarityCriteria {
+    ///         dry_run: false,
+    ///         ..SimilarityCriteria::default()
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn smart_suspend(
+        &self,
+        query: &str,
+        criteria: SimilarityCriteria,
+    ) -> Result<SmartSuspendReport> {
+        let card_ids = self.client.cards().find(query).await?;
+
+        if card_ids.is_empty() {
+            return Ok(SmartSuspendReport {
+                dry_run: criteria.dry_run,
+                ..Default::default()
+            });
+        }
+
+        let cards = self.client.cards().info(&card_ids).await?;
+
+        // Get note info for field values
+        let note_ids: Vec<i64> = cards.iter().map(|c| c.note_id).collect();
+        let unique_note_ids: Vec<i64> = note_ids
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let notes = self.client.notes().info(&unique_note_ids).await?;
+
+        // Build card -> field value mapping
+        let note_fields: std::collections::HashMap<i64, String> = notes
+            .into_iter()
+            .filter_map(|n| {
+                n.fields
+                    .get(&criteria.field)
+                    .map(|f| (n.note_id, f.value.trim().to_string()))
+            })
+            .collect();
+
+        // Build list of (card_id, note_id, field_value, interval, ease, reps) for comparison
+        let mut card_data: Vec<(i64, i64, String, i64, i64, i64)> = Vec::new();
+        for card in &cards {
+            // Skip already suspended cards
+            if card.queue == -1 {
+                continue;
+            }
+
+            if let Some(field_value) = note_fields.get(&card.note_id) {
+                if !field_value.is_empty() {
+                    card_data.push((
+                        card.card_id,
+                        card.note_id,
+                        field_value.clone(),
+                        card.interval,
+                        card.ease_factor,
+                        card.reps,
+                    ));
+                }
+            }
+        }
+
+        if card_data.len() < 2 {
+            return Ok(SmartSuspendReport {
+                cards_analyzed: card_data.len(),
+                dry_run: criteria.dry_run,
+                ..Default::default()
+            });
+        }
+
+        // Find similar groups using union-find
+        let n = card_data.len();
+        let mut parent: Vec<usize> = (0..n).collect();
+
+        fn find(parent: &mut [usize], i: usize) -> usize {
+            if parent[i] != i {
+                parent[i] = find(parent, parent[i]);
+            }
+            parent[i]
+        }
+
+        fn union(parent: &mut [usize], i: usize, j: usize) {
+            let pi = find(parent, i);
+            let pj = find(parent, j);
+            if pi != pj {
+                parent[pi] = pj;
+            }
+        }
+
+        // Compare all pairs and union similar cards
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let sim = string_similarity(&card_data[i].2, &card_data[j].2);
+                if sim >= criteria.threshold {
+                    union(&mut parent, i, j);
+                }
+            }
+        }
+
+        // Group cards by their root
+        let mut groups_map: std::collections::HashMap<usize, Vec<usize>> =
+            std::collections::HashMap::new();
+        for i in 0..n {
+            let root = find(&mut parent, i);
+            groups_map.entry(root).or_default().push(i);
+        }
+
+        // Process groups with more than one card
+        let mut report = SmartSuspendReport {
+            cards_analyzed: card_data.len(),
+            dry_run: criteria.dry_run,
+            ..Default::default()
+        };
+
+        let mut to_suspend: Vec<i64> = Vec::new();
+
+        for indices in groups_map.values() {
+            if indices.len() < 2 {
+                continue;
+            }
+
+            // Select which card to keep based on strategy
+            let keep_idx = match criteria.keep_strategy {
+                KeepStrategy::MostMature => {
+                    *indices.iter().max_by_key(|&&i| card_data[i].3).unwrap()
+                }
+                KeepStrategy::LeastMature => {
+                    *indices.iter().min_by_key(|&&i| card_data[i].3).unwrap()
+                }
+                KeepStrategy::HighestEase => {
+                    *indices.iter().max_by_key(|&&i| card_data[i].4).unwrap()
+                }
+                KeepStrategy::MostReviewed => {
+                    *indices.iter().max_by_key(|&&i| card_data[i].5).unwrap()
+                }
+            };
+
+            let suspend_ids: Vec<i64> = indices
+                .iter()
+                .filter(|&&i| i != keep_idx)
+                .map(|&i| card_data[i].0)
+                .collect();
+
+            // Calculate minimum similarity within group
+            let mut min_sim = 1.0f64;
+            for &i in indices {
+                for &j in indices {
+                    if i < j {
+                        let sim = string_similarity(&card_data[i].2, &card_data[j].2);
+                        min_sim = min_sim.min(sim);
+                    }
+                }
+            }
+
+            to_suspend.extend(&suspend_ids);
+
+            report.groups.push(SimilarGroup {
+                keep: card_data[keep_idx].0,
+                suspend: suspend_ids,
+                field_value: card_data[keep_idx].2.clone(),
+                min_similarity: min_sim,
+            });
+        }
+
+        report.groups_found = report.groups.len();
+        report.cards_suspended = to_suspend.len();
+        report.cards_kept = report.groups_found;
+
+        // Actually suspend if not a dry run
+        if !criteria.dry_run && !to_suspend.is_empty() {
+            self.client.cards().suspend(&to_suspend).await?;
+        }
+
+        Ok(report)
+    }
+}
+
+/// Calculate string similarity using normalized Levenshtein distance.
+fn string_similarity(a: &str, b: &str) -> f64 {
+    let a_lower = a.to_lowercase();
+    let b_lower = b.to_lowercase();
+
+    if a_lower == b_lower {
+        return 1.0;
+    }
+
+    if a_lower.is_empty() || b_lower.is_empty() {
+        return 0.0;
+    }
+
+    let distance = levenshtein_distance(&a_lower, &b_lower);
+    let max_len = a_lower.chars().count().max(b_lower.chars().count());
+
+    1.0 - (distance as f64 / max_len as f64)
+}
+
+/// Calculate the Levenshtein distance between two strings.
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+
+    let m = a_chars.len();
+    let n = b_chars.len();
+
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
+
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr = vec![0; n + 1];
+
+    for i in 1..=m {
+        curr[0] = i;
+
+        for j in 1..=n {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[n]
 }
