@@ -11,6 +11,7 @@ repository = "https://github.com/joshrotenberg/ankit"
 [workspace.dependencies]
 ankit = { path = "crates/ankit" }
 ankit-engine = { path = "crates/ankit-engine" }
+ankit-builder = { path = "crates/ankit-builder" }
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }

@@ -433,6 +433,51 @@ struct RemoveDuplicatesParams {
     keep: String,
 }
 
+// TOML Builder params
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ExportDeckTomlParams {
+    /// Deck name to export
+    deck: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct DiffDeckTomlParams {
+    /// TOML definition content
+    toml_content: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct PlanSyncTomlParams {
+    /// TOML definition content
+    toml_content: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SyncDeckTomlParams {
+    /// TOML definition content
+    toml_content: String,
+    /// Sync strategy: "push_only", "pull_only", or "bidirectional"
+    #[serde(default = "default_sync_strategy")]
+    strategy: String,
+    /// Conflict resolution: "prefer_toml", "prefer_anki", "fail", or "skip"
+    #[serde(default = "default_conflict_resolution")]
+    conflict_resolution: String,
+}
+
+fn default_sync_strategy() -> String {
+    "push_only".to_string()
+}
+
+fn default_conflict_resolution() -> String {
+    "skip".to_string()
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ImportDeckTomlParams {
+    /// TOML definition content
+    toml_content: String,
+}
+
 // ============================================================================
 // Server Implementation
 // ============================================================================
@@ -1736,6 +1781,185 @@ impl AnkiServer {
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Removed {} duplicate notes (kept {} unique)",
             report.deleted, report.kept
+        ))]))
+    }
+
+    // ========================================================================
+    // TOML Builder Tools
+    // ========================================================================
+
+    #[tool(
+        description = "Export a deck from Anki to TOML format. Returns the TOML content that can be saved to a file."
+    )]
+    async fn export_deck_toml(
+        &self,
+        Parameters(params): Parameters<ExportDeckTomlParams>,
+    ) -> Result<CallToolResult, McpError> {
+        debug!(deck = %params.deck, "Exporting deck to TOML");
+
+        let builder = ankit_builder::DeckBuilder::from_anki(self.engine.client(), &params.deck)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let toml = builder
+            .definition()
+            .to_toml()
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        info!(deck = %params.deck, "Deck exported to TOML");
+        Ok(CallToolResult::success(vec![Content::text(toml)]))
+    }
+
+    #[tool(
+        description = "Compare a TOML deck definition against the current state in Anki. Shows notes only in TOML, only in Anki, and modified notes."
+    )]
+    async fn diff_deck_toml(
+        &self,
+        Parameters(params): Parameters<DiffDeckTomlParams>,
+    ) -> Result<CallToolResult, McpError> {
+        debug!("Diffing TOML against Anki");
+
+        let builder = ankit_builder::DeckBuilder::parse(&params.toml_content)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let diff = builder
+            .diff_connect_with_client(self.engine.client())
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        debug!(
+            toml_only = diff.toml_only.len(),
+            anki_only = diff.anki_only.len(),
+            modified = diff.modified.len(),
+            unchanged = diff.unchanged,
+            "Diff completed"
+        );
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&diff).unwrap(),
+        )]))
+    }
+
+    #[tool(
+        description = "Preview what sync would do between a TOML definition and Anki without making changes."
+    )]
+    async fn plan_sync_toml(
+        &self,
+        Parameters(params): Parameters<PlanSyncTomlParams>,
+    ) -> Result<CallToolResult, McpError> {
+        debug!("Planning TOML sync");
+
+        let builder = ankit_builder::DeckBuilder::parse(&params.toml_content)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let plan = builder
+            .plan_sync_with_client(self.engine.client())
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        debug!(
+            to_push = plan.to_push.len(),
+            to_pull = plan.to_pull.len(),
+            conflicts = plan.conflicts.len(),
+            "Sync plan generated"
+        );
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&plan).unwrap(),
+        )]))
+    }
+
+    #[tool(
+        description = "Sync a TOML deck definition with Anki. Strategy can be 'push_only' (TOML -> Anki), 'pull_only' (Anki -> TOML), or 'bidirectional'. Returns sync results and optionally updated TOML."
+    )]
+    async fn sync_deck_toml(
+        &self,
+        Parameters(params): Parameters<SyncDeckTomlParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.check_write("sync_deck_toml")?;
+        debug!(strategy = %params.strategy, "Syncing TOML with Anki");
+
+        let builder = ankit_builder::DeckBuilder::parse(&params.toml_content)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let conflict_resolution = match params.conflict_resolution.as_str() {
+            "prefer_toml" => ankit_builder::ConflictResolution::PreferToml,
+            "prefer_anki" => ankit_builder::ConflictResolution::PreferAnki,
+            "fail" => ankit_builder::ConflictResolution::Fail,
+            _ => ankit_builder::ConflictResolution::Skip,
+        };
+
+        let strategy = match params.strategy.as_str() {
+            "pull_only" => ankit_builder::SyncStrategy::pull_only(),
+            "bidirectional" => ankit_builder::SyncStrategy {
+                conflict_resolution,
+                pull_new_notes: true,
+                push_new_notes: true,
+                update_tags: true,
+            },
+            _ => ankit_builder::SyncStrategy::push_only(),
+        };
+
+        let result = builder
+            .sync_with_client(self.engine.client(), strategy)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        info!(
+            pushed = result.pushed.len(),
+            pulled = result.pulled.len(),
+            resolved = result.resolved_conflicts.len(),
+            skipped = result.skipped_conflicts.len(),
+            errors = result.errors.len(),
+            "Sync completed"
+        );
+
+        // Build response with results and optionally updated TOML
+        let mut response = serde_json::json!({
+            "pushed": result.pushed.len(),
+            "pulled": result.pulled.len(),
+            "resolved_conflicts": result.resolved_conflicts.len(),
+            "skipped_conflicts": result.skipped_conflicts.len(),
+            "errors": result.errors,
+        });
+
+        if let Some(updated_def) = result.updated_definition {
+            if let Ok(updated_toml) = updated_def.to_toml() {
+                response["updated_toml"] = serde_json::Value::String(updated_toml);
+            }
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&response).unwrap(),
+        )]))
+    }
+
+    #[tool(description = "Import a TOML deck definition into Anki. Creates decks and adds notes.")]
+    async fn import_deck_toml(
+        &self,
+        Parameters(params): Parameters<ImportDeckTomlParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.check_write("import_deck_toml")?;
+        debug!("Importing TOML to Anki");
+
+        let builder = ankit_builder::DeckBuilder::parse(&params.toml_content)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let result = builder
+            .import_connect_batch()
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        info!(
+            decks_created = result.decks_created,
+            notes_created = result.notes_created,
+            notes_skipped = result.notes_skipped,
+            "TOML imported"
+        );
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Imported: {} decks created, {} notes created, {} notes skipped",
+            result.decks_created, result.notes_created, result.notes_skipped
         ))]))
     }
 }

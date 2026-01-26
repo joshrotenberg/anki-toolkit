@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 ankit-engine.workspace = true
+ankit-builder = { workspace = true, features = ["connect"] }
 rmcp.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std"] }
 serde.workspace = true
