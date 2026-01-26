@@ -47,6 +47,40 @@ struct Args {
     /// Enable verbose logging (use multiple times for more verbosity)
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
+
+    /// Transport mode: stdio (default) or http
+    #[arg(long, default_value = "stdio")]
+    transport: Transport,
+
+    /// HTTP server port (only used with --transport http)
+    #[arg(long, default_value_t = 3000)]
+    http_port: u16,
+
+    /// HTTP server bind address (only used with --transport http)
+    #[arg(long, default_value = "127.0.0.1")]
+    http_host: String,
+}
+
+/// Transport mode for the MCP server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Transport {
+    /// Standard I/O transport (default, for CLI integration)
+    #[default]
+    Stdio,
+    /// HTTP transport with SSE (for remote connections)
+    Http,
+}
+
+impl std::str::FromStr for Transport {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "stdio" => Ok(Transport::Stdio),
+            "http" => Ok(Transport::Http),
+            _ => Err(format!("Invalid transport: {}. Use 'stdio' or 'http'", s)),
+        }
+    }
 }
 
 // ============================================================================
@@ -2058,12 +2092,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let url = format!("http://{}:{}", args.host, args.port);
-    info!(url = %url, read_only = args.read_only, "Starting ankit-mcp server");
+    info!(
+        anki_url = %url,
+        read_only = args.read_only,
+        transport = ?args.transport,
+        "Starting ankit-mcp server"
+    );
 
     let server = AnkiServer::new(&url, args.read_only);
-    let transport = (tokio::io::stdin(), tokio::io::stdout());
-    let mcp_server = server.serve(transport).await?;
-    mcp_server.waiting().await?;
+
+    match args.transport {
+        Transport::Stdio => {
+            let transport = (tokio::io::stdin(), tokio::io::stdout());
+            let mcp_server = server.serve(transport).await?;
+            mcp_server.waiting().await?;
+        }
+        Transport::Http => {
+            use rmcp::transport::streamable_http_server::{
+                StreamableHttpServerConfig, StreamableHttpService,
+                session::local::LocalSessionManager,
+            };
+
+            let bind_addr = format!("{}:{}", args.http_host, args.http_port);
+            info!(bind_addr = %bind_addr, "Starting HTTP transport");
+
+            let service: StreamableHttpService<AnkiServer, LocalSessionManager> =
+                StreamableHttpService::new(
+                    move || Ok(server.clone()),
+                    Arc::new(LocalSessionManager::default()),
+                    StreamableHttpServerConfig::default(),
+                );
+
+            let router = axum::Router::new().nest_service("/mcp", service);
+            let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
+            info!(bind_addr = %bind_addr, "MCP server listening on HTTP");
+
+            axum::serve(listener, router).await?;
+        }
+    }
 
     Ok(())
 }
