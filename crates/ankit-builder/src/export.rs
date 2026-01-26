@@ -123,6 +123,7 @@ impl<'a> DeckExporter<'a> {
                     fields,
                     tags: note.tags.clone(),
                     guid: None,
+                    note_id: Some(note.note_id),
                 }
             })
             .collect();
@@ -217,6 +218,7 @@ impl<'a> DeckExporter<'a> {
                     fields,
                     tags: note.tags,
                     guid: None,
+                    note_id: Some(note.note_id),
                 });
             }
         }
@@ -359,5 +361,91 @@ Back = "Answer"
         assert_eq!(definition.package.name, definition2.package.name);
         assert_eq!(definition.models.len(), definition2.models.len());
         assert_eq!(definition.notes.len(), definition2.notes.len());
+    }
+
+    #[test]
+    fn test_note_id_serialization() {
+        let toml_input = r#"
+[package]
+name = "Test"
+version = "1.0.0"
+
+[[models]]
+name = "Basic"
+fields = ["Front", "Back"]
+
+[[models.templates]]
+name = "Card 1"
+front = "{{Front}}"
+back = "{{Back}}"
+
+[[decks]]
+name = "Test"
+
+[[notes]]
+deck = "Test"
+model = "Basic"
+note_id = 1234567890
+
+[notes.fields]
+Front = "Q"
+Back = "A"
+"#;
+
+        // Parse TOML with note_id
+        let definition = DeckDefinition::parse(toml_input).unwrap();
+        assert_eq!(definition.notes[0].note_id, Some(1234567890));
+
+        // Serialize and verify note_id is preserved
+        let toml_output = definition.to_toml().unwrap();
+        assert!(
+            toml_output.contains("note_id = 1234567890"),
+            "note_id should be in output: {}",
+            toml_output
+        );
+
+        // Roundtrip
+        let definition2 = DeckDefinition::parse(&toml_output).unwrap();
+        assert_eq!(definition2.notes[0].note_id, Some(1234567890));
+    }
+
+    #[test]
+    fn test_note_id_omitted_when_none() {
+        let toml_input = r#"
+[package]
+name = "Test"
+version = "1.0.0"
+
+[[models]]
+name = "Basic"
+fields = ["Front", "Back"]
+
+[[models.templates]]
+name = "Card 1"
+front = "{{Front}}"
+back = "{{Back}}"
+
+[[decks]]
+name = "Test"
+
+[[notes]]
+deck = "Test"
+model = "Basic"
+
+[notes.fields]
+Front = "Q"
+Back = "A"
+"#;
+
+        let definition = DeckDefinition::parse(toml_input).unwrap();
+        assert_eq!(definition.notes[0].note_id, None);
+
+        // Serialize and verify note_id is NOT in output
+        let toml_output = definition.to_toml().unwrap();
+        assert!(
+            !toml_output.contains("note_id"),
+            "note_id should be omitted when None: {}",
+            toml_output
+        );
     }
 }
