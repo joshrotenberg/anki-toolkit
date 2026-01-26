@@ -757,6 +757,214 @@ impl<'a> AnalyzeEngine<'a> {
 
         Ok(comparison)
     }
+
+    /// Generate a study plan with recommendations.
+    ///
+    /// Creates a plan for a study session based on due cards, new cards,
+    /// and target study time. Provides recommendations for optimizing
+    /// the session.
+    ///
+    /// # Arguments
+    ///
+    /// * `deck` - Deck to plan for
+    /// * `options` - Planning options (target time, new card ratio, etc.)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit_engine::Engine;
+    /// # use ankit_engine::analyze::PlanOptions;
+    /// # async fn example() -> ankit_engine::Result<()> {
+    /// let engine = Engine::new();
+    ///
+    /// let plan = engine.analyze()
+    ///     .study_plan("Japanese", PlanOptions {
+    ///         target_time_minutes: 30,
+    ///         new_card_ratio: 0.2,
+    ///         prioritize_leeches: true,
+    ///         ..PlanOptions::default()
+    ///     })
+    ///     .await?;
+    ///
+    /// println!("Estimated time: {} minutes", plan.estimated_time);
+    /// println!("Reviews: {}, New: {}", plan.review_count, plan.new_count);
+    ///
+    /// for rec in &plan.recommendations {
+    ///     println!("- {}", rec);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn study_plan(&self, deck: &str, options: PlanOptions) -> Result<StudyPlan> {
+        let mut plan = StudyPlan {
+            deck: deck.to_string(),
+            ..Default::default()
+        };
+
+        // Get due cards
+        let due_query = format!("deck:\"{}\" is:due -is:suspended", deck);
+        let due_card_ids = self.client.cards().find(&due_query).await?;
+        plan.total_due = due_card_ids.len();
+
+        // Get new cards
+        let new_query = format!("deck:\"{}\" is:new -is:suspended", deck);
+        let new_card_ids = self.client.cards().find(&new_query).await?;
+        plan.total_new_available = new_card_ids.len();
+
+        if due_card_ids.is_empty() && new_card_ids.is_empty() {
+            plan.recommendations
+                .push("No cards to study! Consider adding new material.".to_string());
+            return Ok(plan);
+        }
+
+        // Get card info for prioritization
+        let due_cards = if due_card_ids.is_empty() {
+            Vec::new()
+        } else {
+            self.client.cards().info(&due_card_ids).await?
+        };
+
+        // Calculate target card counts based on time
+        let total_seconds = options.target_time_minutes * 60;
+
+        // First, identify leeches and calculate how many we can fit
+        let mut leech_ids: Vec<i64> = Vec::new();
+        let mut regular_review_ids: Vec<i64> = Vec::new();
+
+        for card in &due_cards {
+            if card.lapses >= options.leech_threshold {
+                leech_ids.push(card.card_id);
+            } else {
+                regular_review_ids.push(card.card_id);
+            }
+        }
+
+        plan.leech_count = leech_ids.len();
+
+        // Calculate card allocation
+        let mut remaining_seconds = total_seconds;
+        let mut selected_reviews: Vec<i64> = Vec::new();
+        let mut selected_new: Vec<i64> = Vec::new();
+
+        // If prioritizing leeches, add them first
+        if options.prioritize_leeches && !leech_ids.is_empty() {
+            let leech_time = leech_ids.len() as u32 * options.seconds_per_review_card;
+            if leech_time <= remaining_seconds {
+                selected_reviews.extend(&leech_ids);
+                remaining_seconds -= leech_time;
+            } else {
+                // Can only fit some leeches
+                let max_leeches = (remaining_seconds / options.seconds_per_review_card) as usize;
+                selected_reviews.extend(leech_ids.iter().take(max_leeches));
+                remaining_seconds = 0;
+            }
+        }
+
+        // Calculate remaining time split between new and review cards
+        if remaining_seconds > 0 {
+            // Target ratio of new cards
+            let new_time_budget = (remaining_seconds as f64 * options.new_card_ratio) as u32;
+            let review_time_budget = remaining_seconds - new_time_budget;
+
+            // How many of each can we fit?
+            let max_new = (new_time_budget / options.seconds_per_new_card) as usize;
+            let max_reviews = (review_time_budget / options.seconds_per_review_card) as usize;
+
+            // Select regular reviews (excluding already-selected leeches)
+            let available_reviews: Vec<i64> = if options.prioritize_leeches {
+                regular_review_ids.clone()
+            } else {
+                due_card_ids.clone()
+            };
+
+            let reviews_to_add = available_reviews.iter().take(max_reviews);
+            selected_reviews.extend(reviews_to_add);
+
+            // Select new cards
+            let new_to_add = new_card_ids.iter().take(max_new);
+            selected_new.extend(new_to_add);
+        }
+
+        // Build the suggested order
+        // Order: Leeches first (if prioritized), then reviews, then new
+        let mut ordered_cards: Vec<(i64, CardPriority)> = Vec::new();
+
+        if options.prioritize_leeches {
+            for &id in &leech_ids {
+                if selected_reviews.contains(&id) {
+                    ordered_cards.push((id, CardPriority::Leech));
+                }
+            }
+        }
+
+        for &id in &selected_reviews {
+            if !leech_ids.contains(&id) || !options.prioritize_leeches {
+                ordered_cards.push((id, CardPriority::DueReview));
+            }
+        }
+
+        for &id in &selected_new {
+            ordered_cards.push((id, CardPriority::New));
+        }
+
+        // Sort by priority
+        ordered_cards.sort_by_key(|(_, priority)| *priority);
+
+        plan.suggested_order = ordered_cards.into_iter().map(|(id, _)| id).collect();
+        plan.review_count = selected_reviews.len();
+        plan.new_count = selected_new.len();
+
+        // Calculate estimated time
+        let review_time = plan.review_count as u32 * options.seconds_per_review_card;
+        let new_time = plan.new_count as u32 * options.seconds_per_new_card;
+        plan.estimated_time = (review_time + new_time) / 60;
+
+        // Generate recommendations
+        if plan.leech_count > 0 {
+            plan.recommendations.push(format!(
+                "You have {} leech cards that need extra attention.",
+                plan.leech_count
+            ));
+        }
+
+        if plan.total_due > plan.review_count {
+            plan.recommendations.push(format!(
+                "Only {} of {} due cards fit in your target time.",
+                plan.review_count, plan.total_due
+            ));
+        }
+
+        if plan.total_new_available > 0 && plan.new_count == 0 {
+            plan.recommendations
+                .push("No time for new cards today. Consider increasing study time.".to_string());
+        } else if plan.new_count > 0 {
+            plan.recommendations.push(format!(
+                "Introducing {} new cards ({:.0}% of session).",
+                plan.new_count,
+                (plan.new_count as f64 / (plan.review_count + plan.new_count) as f64) * 100.0
+            ));
+        }
+
+        if plan.review_count + plan.new_count == 0 {
+            plan.recommendations
+                .push("No cards fit the target time. Try increasing study time.".to_string());
+        }
+
+        let actual_ratio = if plan.review_count + plan.new_count > 0 {
+            plan.new_count as f64 / (plan.review_count + plan.new_count) as f64
+        } else {
+            0.0
+        };
+
+        if actual_ratio < options.new_card_ratio * 0.5 && plan.total_new_available > 0 {
+            plan.recommendations.push(
+                "New card ratio is below target. You may be accumulating a review backlog."
+                    .to_string(),
+            );
+        }
+
+        Ok(plan)
+    }
 }
 
 /// Calculate string similarity using normalized Levenshtein distance.
@@ -1008,4 +1216,68 @@ pub struct DeckAudit {
     pub review_cards: usize,
     /// Average ease factor (percentage * 10, e.g., 2500 = 250%).
     pub average_ease: f64,
+}
+
+/// Options for generating a study plan.
+#[derive(Debug, Clone)]
+pub struct PlanOptions {
+    /// Target study time in minutes.
+    pub target_time_minutes: u32,
+    /// Ratio of new cards (0.0 - 1.0). E.g., 0.2 means 20% new cards.
+    pub new_card_ratio: f64,
+    /// Whether to prioritize leech cards (cards with high lapses).
+    pub prioritize_leeches: bool,
+    /// Estimated seconds per new card.
+    pub seconds_per_new_card: u32,
+    /// Estimated seconds per review card.
+    pub seconds_per_review_card: u32,
+    /// Leech threshold (minimum lapses to consider a card a leech).
+    pub leech_threshold: i64,
+}
+
+impl Default for PlanOptions {
+    fn default() -> Self {
+        Self {
+            target_time_minutes: 30,
+            new_card_ratio: 0.2,
+            prioritize_leeches: true,
+            seconds_per_new_card: 30,   // 30 seconds for new cards
+            seconds_per_review_card: 8, // 8 seconds for reviews
+            leech_threshold: 8,
+        }
+    }
+}
+
+/// A generated study plan with recommendations.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct StudyPlan {
+    /// The deck name.
+    pub deck: String,
+    /// Estimated time to complete the plan in minutes.
+    pub estimated_time: u32,
+    /// Number of review cards in the plan.
+    pub review_count: usize,
+    /// Number of new cards in the plan.
+    pub new_count: usize,
+    /// Number of leech cards in the plan.
+    pub leech_count: usize,
+    /// Total cards due today.
+    pub total_due: usize,
+    /// Total new cards available.
+    pub total_new_available: usize,
+    /// Recommendations for the study session.
+    pub recommendations: Vec<String>,
+    /// Suggested card IDs in study order.
+    pub suggested_order: Vec<i64>,
+}
+
+/// Priority category for a card in the study plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CardPriority {
+    /// Leech cards should be studied first when prioritize_leeches is true.
+    Leech,
+    /// Review cards due today.
+    DueReview,
+    /// New cards.
+    New,
 }

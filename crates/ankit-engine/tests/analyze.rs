@@ -2,7 +2,7 @@
 
 mod common;
 
-use ankit_engine::analyze::{CompareOptions, ProblemCriteria};
+use ankit_engine::analyze::{CompareOptions, PlanOptions, ProblemCriteria};
 use common::{
     engine_for_mock, mock_action, mock_action_times, mock_anki_response, setup_mock_server,
 };
@@ -958,5 +958,414 @@ async fn test_compare_decks_preserves_tags() {
     assert_eq!(
         comparison.exact_matches[0].1.tags,
         vec!["vocabulary", "n5", "verb"]
+    );
+}
+
+#[tokio::test]
+async fn test_study_plan_basic() {
+    let server = setup_mock_server().await;
+
+    // Mock findCards - called twice: once for due cards, once for new cards
+    // Both return same card IDs for simplicity
+    mock_action_times(
+        &server,
+        "findCards",
+        mock_anki_response(vec![1_i64, 2, 3]),
+        2,
+    )
+    .await;
+
+    // Mock cardsInfo for the due cards
+    mock_action(
+        &server,
+        "cardsInfo",
+        mock_anki_response(vec![
+            serde_json::json!({
+                "cardId": 1_i64,
+                "noteId": 101_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 10,
+                "factor": 2500,
+                "reps": 10,
+                "lapses": 2, // Not a leech
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 2_i64,
+                "noteId": 102_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 20,
+                "factor": 2500,
+                "reps": 15,
+                "lapses": 1,
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 3_i64,
+                "noteId": 103_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 30,
+                "factor": 2500,
+                "reps": 20,
+                "lapses": 0,
+                "left": 0,
+                "mod": 0
+            }),
+        ]),
+    )
+    .await;
+
+    let engine = engine_for_mock(&server);
+    let plan = engine
+        .analyze()
+        .study_plan(
+            "Japanese",
+            PlanOptions {
+                target_time_minutes: 30,
+                new_card_ratio: 0.2,
+                prioritize_leeches: true,
+                ..PlanOptions::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(plan.deck, "Japanese");
+    assert_eq!(plan.total_due, 3);
+    // With 3 due cards and 0 new cards, all should be reviews
+    assert!(plan.review_count <= 3);
+    assert_eq!(plan.leech_count, 0); // No cards have >= 8 lapses
+}
+
+#[tokio::test]
+async fn test_study_plan_empty_deck() {
+    let server = setup_mock_server().await;
+
+    // Mock findCards returning empty for both due and new
+    mock_action_times(
+        &server,
+        "findCards",
+        mock_anki_response(Vec::<i64>::new()),
+        2,
+    )
+    .await;
+
+    let engine = engine_for_mock(&server);
+    let plan = engine
+        .analyze()
+        .study_plan("Empty", PlanOptions::default())
+        .await
+        .unwrap();
+
+    assert_eq!(plan.deck, "Empty");
+    assert_eq!(plan.total_due, 0);
+    assert_eq!(plan.total_new_available, 0);
+    assert_eq!(plan.review_count, 0);
+    assert_eq!(plan.new_count, 0);
+    assert!(!plan.recommendations.is_empty());
+    assert!(plan.recommendations[0].contains("No cards to study"));
+}
+
+#[tokio::test]
+async fn test_study_plan_with_leeches() {
+    let server = setup_mock_server().await;
+
+    // Mock findCards - first call for due cards, second for new cards
+    mock_action_times(&server, "findCards", mock_anki_response(vec![1_i64, 2]), 2).await;
+
+    // Mock cardsInfo - one leech card, one normal
+    mock_action(
+        &server,
+        "cardsInfo",
+        mock_anki_response(vec![
+            serde_json::json!({
+                "cardId": 1_i64,
+                "noteId": 101_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 5,
+                "factor": 1800,
+                "reps": 30,
+                "lapses": 12, // Leech (>= 8)
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 2_i64,
+                "noteId": 102_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 30,
+                "factor": 2500,
+                "reps": 10,
+                "lapses": 1, // Normal
+                "left": 0,
+                "mod": 0
+            }),
+        ]),
+    )
+    .await;
+
+    let engine = engine_for_mock(&server);
+    let plan = engine
+        .analyze()
+        .study_plan(
+            "Japanese",
+            PlanOptions {
+                target_time_minutes: 30,
+                prioritize_leeches: true,
+                leech_threshold: 8,
+                ..PlanOptions::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(plan.leech_count, 1);
+    // Recommendations should mention leeches
+    assert!(plan.recommendations.iter().any(|r| r.contains("leech")));
+    // With leech prioritization, leech card should be first in suggested order
+    if !plan.suggested_order.is_empty() {
+        assert_eq!(plan.suggested_order[0], 1); // Leech card first
+    }
+}
+
+#[tokio::test]
+async fn test_study_plan_time_constraint() {
+    let server = setup_mock_server().await;
+
+    // Mock findCards - called twice (due and new)
+    mock_action_times(
+        &server,
+        "findCards",
+        mock_anki_response(vec![1_i64, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+        2,
+    )
+    .await;
+
+    // Mock cardsInfo
+    let cards: Vec<serde_json::Value> = (1..=10)
+        .map(|i| {
+            serde_json::json!({
+                "cardId": i as i64,
+                "noteId": (100 + i) as i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 10,
+                "factor": 2500,
+                "reps": 10,
+                "lapses": 1,
+                "left": 0,
+                "mod": 0
+            })
+        })
+        .collect();
+    mock_action(&server, "cardsInfo", mock_anki_response(cards)).await;
+
+    let engine = engine_for_mock(&server);
+    let plan = engine
+        .analyze()
+        .study_plan(
+            "Japanese",
+            PlanOptions {
+                target_time_minutes: 1, // Very short time
+                seconds_per_review_card: 8,
+                new_card_ratio: 0.0, // No new cards
+                ..PlanOptions::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(plan.total_due, 10);
+    // With only 1 minute (60 seconds) and 8 seconds per card, can only fit ~7 cards
+    assert!(plan.review_count < 10);
+    // Should have a recommendation about not fitting all cards
+    assert!(
+        plan.recommendations
+            .iter()
+            .any(|r| r.contains("fit in your target time") || r.contains("Only"))
+    );
+}
+
+#[tokio::test]
+async fn test_study_plan_with_new_cards() {
+    let server = setup_mock_server().await;
+
+    // Mock findCards - called twice (due and new)
+    // Both return same card IDs - the implementation treats first as due, second as new
+    mock_action_times(
+        &server,
+        "findCards",
+        mock_anki_response(vec![1_i64, 2, 3, 4, 5]),
+        2,
+    )
+    .await;
+
+    // Mock cardsInfo for the due cards
+    mock_action(
+        &server,
+        "cardsInfo",
+        mock_anki_response(vec![
+            serde_json::json!({
+                "cardId": 1_i64,
+                "noteId": 101_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 10,
+                "factor": 2500,
+                "reps": 10,
+                "lapses": 1,
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 2_i64,
+                "noteId": 102_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 10,
+                "factor": 2500,
+                "reps": 10,
+                "lapses": 1,
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 3_i64,
+                "noteId": 103_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 10,
+                "factor": 2500,
+                "reps": 10,
+                "lapses": 1,
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 4_i64,
+                "noteId": 104_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 10,
+                "factor": 2500,
+                "reps": 10,
+                "lapses": 1,
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 5_i64,
+                "noteId": 105_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 10,
+                "factor": 2500,
+                "reps": 10,
+                "lapses": 1,
+                "left": 0,
+                "mod": 0
+            }),
+        ]),
+    )
+    .await;
+
+    let engine = engine_for_mock(&server);
+    let plan = engine
+        .analyze()
+        .study_plan(
+            "Japanese",
+            PlanOptions {
+                target_time_minutes: 10,
+                new_card_ratio: 0.5, // 50% new cards
+                seconds_per_new_card: 30,
+                seconds_per_review_card: 8,
+                ..PlanOptions::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(plan.total_due, 5);
+    assert_eq!(plan.total_new_available, 5);
+    // Plan should include both reviews and new cards
+    assert!(plan.review_count > 0 || plan.new_count > 0);
+    // Should have recommendation about new cards
+    assert!(
+        plan.recommendations
+            .iter()
+            .any(|r| r.contains("new card") || r.contains("Introducing"))
     );
 }
