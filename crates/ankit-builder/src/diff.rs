@@ -364,10 +364,38 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_key_nested_html() {
+        assert_eq!(normalize_key("<div><p>Nested</p></div>"), "nested");
+        assert_eq!(normalize_key("<a href='url'>Link</a>"), "link");
+    }
+
+    #[test]
+    fn test_normalize_key_empty() {
+        assert_eq!(normalize_key(""), "");
+        assert_eq!(normalize_key("   "), "");
+        assert_eq!(normalize_key("<>"), "");
+    }
+
+    #[test]
     fn test_strip_html() {
         assert_eq!(strip_html("<p>Hello</p>"), "Hello");
         assert_eq!(strip_html("<b>Bold</b> text"), "Bold text");
         assert_eq!(strip_html("No tags"), "No tags");
+    }
+
+    #[test]
+    fn test_strip_html_unclosed_tags() {
+        assert_eq!(strip_html("<p>Unclosed"), "Unclosed");
+        assert_eq!(strip_html("Text<br>More"), "TextMore");
+    }
+
+    #[test]
+    fn test_strip_html_attributes() {
+        assert_eq!(strip_html("<a href=\"url\">Link</a>"), "Link");
+        assert_eq!(
+            strip_html("<div class=\"foo\" id=\"bar\">Content</div>"),
+            "Content"
+        );
     }
 
     #[test]
@@ -386,5 +414,122 @@ mod tests {
             removed: vec!["old".to_string()],
         };
         assert!(!with_removed.is_empty());
+    }
+
+    #[test]
+    fn test_tag_changes_both() {
+        let both = TagChanges {
+            added: vec!["new".to_string()],
+            removed: vec!["old".to_string()],
+        };
+        assert!(!both.is_empty());
+    }
+
+    #[test]
+    fn test_deck_diff_default() {
+        let diff = DeckDiff::default();
+        assert!(diff.toml_only.is_empty());
+        assert!(diff.anki_only.is_empty());
+        assert!(diff.modified.is_empty());
+        assert_eq!(diff.unchanged, 0);
+    }
+
+    #[test]
+    fn test_note_diff_construction() {
+        let note = NoteDiff {
+            note_id: Some(12345),
+            model: "Basic".to_string(),
+            deck: "Test".to_string(),
+            first_field: "Question".to_string(),
+            tags: vec!["tag1".to_string(), "tag2".to_string()],
+        };
+
+        assert_eq!(note.note_id, Some(12345));
+        assert_eq!(note.model, "Basic");
+        assert_eq!(note.deck, "Test");
+        assert_eq!(note.first_field, "Question");
+        assert_eq!(note.tags.len(), 2);
+    }
+
+    #[test]
+    fn test_field_change_construction() {
+        let change = FieldChange {
+            field: "Back".to_string(),
+            toml_value: "TOML answer".to_string(),
+            anki_value: "Anki answer".to_string(),
+        };
+
+        assert_eq!(change.field, "Back");
+        assert_eq!(change.toml_value, "TOML answer");
+        assert_eq!(change.anki_value, "Anki answer");
+    }
+
+    #[test]
+    fn test_modified_note_construction() {
+        let modified = ModifiedNote {
+            note_id: 67890,
+            first_field: "Word".to_string(),
+            model: "Vocabulary".to_string(),
+            field_changes: vec![FieldChange {
+                field: "Definition".to_string(),
+                toml_value: "new def".to_string(),
+                anki_value: "old def".to_string(),
+            }],
+            tag_changes: TagChanges {
+                added: vec!["updated".to_string()],
+                removed: vec![],
+            },
+        };
+
+        assert_eq!(modified.note_id, 67890);
+        assert_eq!(modified.first_field, "Word");
+        assert_eq!(modified.model, "Vocabulary");
+        assert_eq!(modified.field_changes.len(), 1);
+        assert!(!modified.tag_changes.is_empty());
+    }
+
+    #[test]
+    fn test_note_key_equality() {
+        let key1 = NoteKey {
+            deck: "Test".to_string(),
+            model: "Basic".to_string(),
+            first_field: "hello".to_string(),
+        };
+
+        let key2 = NoteKey {
+            deck: "Test".to_string(),
+            model: "Basic".to_string(),
+            first_field: "hello".to_string(),
+        };
+
+        let key3 = NoteKey {
+            deck: "Test".to_string(),
+            model: "Basic".to_string(),
+            first_field: "world".to_string(),
+        };
+
+        assert_eq!(key1, key2);
+        assert_ne!(key1, key3);
+    }
+
+    #[test]
+    fn test_note_key_hash() {
+        use std::collections::HashSet;
+
+        let key1 = NoteKey {
+            deck: "Test".to_string(),
+            model: "Basic".to_string(),
+            first_field: "hello".to_string(),
+        };
+
+        let key2 = NoteKey {
+            deck: "Test".to_string(),
+            model: "Basic".to_string(),
+            first_field: "hello".to_string(),
+        };
+
+        let mut set = HashSet::new();
+        set.insert(key1);
+        assert!(set.contains(&key2));
     }
 }
