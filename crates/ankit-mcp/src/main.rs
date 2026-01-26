@@ -438,24 +438,39 @@ struct RemoveDuplicatesParams {
 struct ExportDeckTomlParams {
     /// Deck name to export
     deck: String,
+    /// Optional path to write TOML file directly (if omitted, returns content)
+    #[serde(default)]
+    output_path: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct DiffDeckTomlParams {
-    /// TOML definition content
-    toml_content: String,
+    /// TOML definition content (mutually exclusive with toml_path)
+    #[serde(default)]
+    toml_content: Option<String>,
+    /// Path to TOML file (mutually exclusive with toml_content)
+    #[serde(default)]
+    toml_path: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct PlanSyncTomlParams {
-    /// TOML definition content
-    toml_content: String,
+    /// TOML definition content (mutually exclusive with toml_path)
+    #[serde(default)]
+    toml_content: Option<String>,
+    /// Path to TOML file (mutually exclusive with toml_content)
+    #[serde(default)]
+    toml_path: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SyncDeckTomlParams {
-    /// TOML definition content
-    toml_content: String,
+    /// TOML definition content (mutually exclusive with toml_path)
+    #[serde(default)]
+    toml_content: Option<String>,
+    /// Path to TOML file (mutually exclusive with toml_content)
+    #[serde(default)]
+    toml_path: Option<String>,
     /// Sync strategy: "push_only", "pull_only", or "bidirectional"
     #[serde(default = "default_sync_strategy")]
     strategy: String,
@@ -474,8 +489,33 @@ fn default_conflict_resolution() -> String {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ImportDeckTomlParams {
-    /// TOML definition content
-    toml_content: String,
+    /// TOML definition content (mutually exclusive with toml_path)
+    #[serde(default)]
+    toml_content: Option<String>,
+    /// Path to TOML file (mutually exclusive with toml_content)
+    #[serde(default)]
+    toml_path: Option<String>,
+}
+
+/// Helper to resolve TOML content from either inline content or file path.
+fn resolve_toml_content(
+    toml_content: Option<String>,
+    toml_path: Option<String>,
+) -> Result<String, McpError> {
+    match (toml_content, toml_path) {
+        (Some(content), None) => Ok(content),
+        (None, Some(path)) => std::fs::read_to_string(&path).map_err(|e| {
+            McpError::invalid_params(format!("Failed to read TOML file '{}': {}", path, e), None)
+        }),
+        (Some(_), Some(_)) => Err(McpError::invalid_params(
+            "Provide either toml_content or toml_path, not both",
+            None,
+        )),
+        (None, None) => Err(McpError::invalid_params(
+            "Must provide either toml_content or toml_path",
+            None,
+        )),
+    }
 }
 
 // ============================================================================
@@ -1789,13 +1829,13 @@ impl AnkiServer {
     // ========================================================================
 
     #[tool(
-        description = "Export a deck from Anki to TOML format. Returns the TOML content that can be saved to a file."
+        description = "Export a deck from Anki to TOML format. Returns the TOML content, or writes to output_path if provided."
     )]
     async fn export_deck_toml(
         &self,
         Parameters(params): Parameters<ExportDeckTomlParams>,
     ) -> Result<CallToolResult, McpError> {
-        debug!(deck = %params.deck, "Exporting deck to TOML");
+        debug!(deck = %params.deck, output_path = ?params.output_path, "Exporting deck to TOML");
 
         let builder = ankit_builder::DeckBuilder::from_anki(self.engine.client(), &params.deck)
             .await
@@ -1806,8 +1846,21 @@ impl AnkiServer {
             .to_toml()
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-        info!(deck = %params.deck, "Deck exported to TOML");
-        Ok(CallToolResult::success(vec![Content::text(toml)]))
+        // Write to file if output_path provided, otherwise return content
+        if let Some(path) = params.output_path {
+            std::fs::write(&path, &toml).map_err(|e| {
+                McpError::internal_error(format!("Failed to write to '{}': {}", path, e), None)
+            })?;
+            let note_count = builder.definition().notes.len();
+            info!(deck = %params.deck, path = %path, notes = note_count, "Deck exported to file");
+            Ok(CallToolResult::success(vec![Content::text(format!(
+                "Exported {} notes to '{}'",
+                note_count, path
+            ))]))
+        } else {
+            info!(deck = %params.deck, "Deck exported to TOML");
+            Ok(CallToolResult::success(vec![Content::text(toml)]))
+        }
     }
 
     #[tool(
@@ -1819,7 +1872,8 @@ impl AnkiServer {
     ) -> Result<CallToolResult, McpError> {
         debug!("Diffing TOML against Anki");
 
-        let builder = ankit_builder::DeckBuilder::parse(&params.toml_content)
+        let toml_content = resolve_toml_content(params.toml_content, params.toml_path)?;
+        let builder = ankit_builder::DeckBuilder::parse(&toml_content)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let diff = builder
@@ -1849,7 +1903,8 @@ impl AnkiServer {
     ) -> Result<CallToolResult, McpError> {
         debug!("Planning TOML sync");
 
-        let builder = ankit_builder::DeckBuilder::parse(&params.toml_content)
+        let toml_content = resolve_toml_content(params.toml_content, params.toml_path)?;
+        let builder = ankit_builder::DeckBuilder::parse(&toml_content)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let plan = builder
@@ -1879,7 +1934,8 @@ impl AnkiServer {
         self.check_write("sync_deck_toml")?;
         debug!(strategy = %params.strategy, "Syncing TOML with Anki");
 
-        let builder = ankit_builder::DeckBuilder::parse(&params.toml_content)
+        let toml_content = resolve_toml_content(params.toml_content, params.toml_path)?;
+        let builder = ankit_builder::DeckBuilder::parse(&toml_content)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let conflict_resolution = match params.conflict_resolution.as_str() {
@@ -1942,7 +1998,8 @@ impl AnkiServer {
         self.check_write("import_deck_toml")?;
         debug!("Importing TOML to Anki");
 
-        let builder = ankit_builder::DeckBuilder::parse(&params.toml_content)
+        let toml_content = resolve_toml_content(params.toml_content, params.toml_path)?;
+        let builder = ankit_builder::DeckBuilder::parse(&toml_content)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let result = builder
