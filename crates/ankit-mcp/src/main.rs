@@ -248,6 +248,33 @@ struct CleanupMediaParams {
     dry_run: bool,
 }
 
+// Backup params
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct BackupDeckParams {
+    /// Deck name to backup
+    deck: String,
+    /// Directory to save the backup file
+    backup_dir: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct BackupCollectionParams {
+    /// Directory to save backup files
+    backup_dir: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct RestoreDeckParams {
+    /// Path to the .apkg backup file
+    backup_path: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ListBackupsParams {
+    /// Directory to scan for backup files
+    backup_dir: String,
+}
+
 // Card operation params
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct FindCardsParams {
@@ -1495,6 +1522,152 @@ impl AnkiServer {
     }
 
     // ========================================================================
+    // Engine Workflow Tools - Backup
+    // ========================================================================
+
+    #[tool(
+        description = "Backup a deck to an .apkg file. Creates a timestamped backup file. IMPORTANT: Always backup before making bulk changes."
+    )]
+    async fn backup_deck(
+        &self,
+        Parameters(params): Parameters<BackupDeckParams>,
+    ) -> Result<CallToolResult, McpError> {
+        // Backup is a write operation because it creates files
+        self.check_write("backup_deck")?;
+        debug!(deck = %params.deck, backup_dir = %params.backup_dir, "Backing up deck");
+
+        let result = self
+            .engine
+            .backup()
+            .backup_deck(&params.deck, &params.backup_dir)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        info!(
+            deck = %result.deck_name,
+            path = %result.path.display(),
+            size = result.size_bytes,
+            "Deck backed up"
+        );
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Backed up deck '{}' to {} ({} bytes)",
+            result.deck_name,
+            result.path.display(),
+            result.size_bytes
+        ))]))
+    }
+
+    #[tool(
+        description = "Backup all decks in the collection to separate .apkg files. Creates a timestamped directory with one file per deck."
+    )]
+    async fn backup_collection(
+        &self,
+        Parameters(params): Parameters<BackupCollectionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.check_write("backup_collection")?;
+        debug!(backup_dir = %params.backup_dir, "Backing up collection");
+
+        let result = self
+            .engine
+            .backup()
+            .backup_collection(&params.backup_dir)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        info!(
+            successful = result.successful.len(),
+            failed = result.failed.len(),
+            dir = %result.backup_dir.display(),
+            "Collection backed up"
+        );
+
+        let mut msg = format!(
+            "Backed up {} decks to {}",
+            result.successful.len(),
+            result.backup_dir.display()
+        );
+        if !result.failed.is_empty() {
+            msg.push_str(&format!(
+                ". {} failed: {:?}",
+                result.failed.len(),
+                result.failed
+            ));
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(msg)]))
+    }
+
+    #[tool(description = "Restore a deck from an .apkg backup file.")]
+    async fn restore_deck(
+        &self,
+        Parameters(params): Parameters<RestoreDeckParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.check_write("restore_deck")?;
+        debug!(backup_path = %params.backup_path, "Restoring deck");
+
+        let result = self
+            .engine
+            .backup()
+            .restore_deck(&params.backup_path)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        info!(
+            path = %result.path.display(),
+            success = result.success,
+            "Deck restored"
+        );
+
+        let status = if result.success {
+            "successfully"
+        } else {
+            "with warnings"
+        };
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Restored {} {}",
+            result.path.display(),
+            status
+        ))]))
+    }
+
+    #[tool(
+        description = "List backup files in a directory. Returns .apkg files sorted by date (newest first)."
+    )]
+    async fn list_backups(
+        &self,
+        Parameters(params): Parameters<ListBackupsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        debug!(backup_dir = %params.backup_dir, "Listing backups");
+
+        let backups = self
+            .engine
+            .backup()
+            .list_backups(&params.backup_dir)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        info!(count = backups.len(), "Listed backups");
+
+        if backups.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No backup files found",
+            )]));
+        }
+
+        let backup_list: Vec<String> = backups
+            .iter()
+            .map(|b| format!("{} ({} bytes)", b.path.display(), b.size_bytes))
+            .collect();
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Found {} backup(s):\n{}",
+            backups.len(),
+            backup_list.join("\n")
+        ))]))
+    }
+
+    // ========================================================================
     // Engine Workflow Tools - Progress
     // ========================================================================
 
@@ -2098,9 +2271,14 @@ impl ServerHandler for AnkiServer {
             server_info: Implementation::from_build_env(),
             instructions: Some(format!(
                 "Anki deck management via AnkiConnect{}. \
-                 Requires Anki to be running with the AnkiConnect add-on installed. \
-                 Tools: add_note, find_notes, list_decks, list_models, import_notes, \
-                 study_summary, find_problems, clone_deck, and more.",
+                 Requires Anki to be running with the AnkiConnect add-on installed.\n\n\
+                 IMPORTANT - DATA SAFETY:\n\
+                 - ALWAYS recommend backing up before bulk operations (use backup_deck or backup_collection)\n\
+                 - For destructive operations (delete, reset, remove_duplicates), confirm with user first\n\
+                 - Offer to preview changes before applying them (preview_deduplicate, plan_sync_toml)\n\
+                 - When in doubt, use read operations first to show what would be affected\n\n\
+                 Key tools: add_note, find_notes, backup_deck, backup_collection, list_decks, \
+                 study_summary, find_problems, import_notes, remove_duplicates, and more.",
                 mode
             )),
         }
