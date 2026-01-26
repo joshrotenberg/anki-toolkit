@@ -433,6 +433,208 @@ impl<'a> AnalyzeEngine<'a> {
 
         Ok(audit)
     }
+
+    /// Generate a comprehensive study report.
+    ///
+    /// Combines multiple statistics into a single overview including activity summary,
+    /// performance metrics, problem cards, and upcoming workload.
+    ///
+    /// # Arguments
+    ///
+    /// * `deck` - Deck to analyze (use "*" for all decks)
+    /// * `days` - Number of days to include in the report
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit_engine::Engine;
+    /// # async fn example() -> ankit_engine::Result<()> {
+    /// let engine = Engine::new();
+    /// let report = engine.analyze().study_report("Japanese", 7).await?;
+    ///
+    /// println!("Study Report for {}", report.deck);
+    /// println!("Reviews: {} ({:.1}/day)", report.total_reviews, report.average_reviews_per_day);
+    /// println!("Retention: {:.1}%", report.retention_rate * 100.0);
+    /// println!("Study streak: {} days", report.study_streak);
+    /// println!("Leeches: {}", report.leeches.len());
+    /// println!("Due tomorrow: {}", report.due_tomorrow);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn study_report(&self, deck: &str, days: u32) -> Result<StudyReport> {
+        let mut report = StudyReport {
+            deck: deck.to_string(),
+            period_days: days,
+            ..Default::default()
+        };
+
+        // Get daily review counts
+        let daily_reviews = self.client.statistics().cards_reviewed_by_day().await?;
+        let take_days = days as usize;
+        let recent: Vec<_> = daily_reviews.into_iter().take(take_days).collect();
+
+        // Calculate activity metrics
+        for (date, count) in &recent {
+            report.total_reviews += *count as usize;
+            report.daily_stats.push(ReportDailyStats {
+                date: date.clone(),
+                reviews: *count as usize,
+            });
+        }
+
+        if !recent.is_empty() {
+            report.average_reviews_per_day = report.total_reviews as f64 / recent.len() as f64;
+        }
+
+        // Calculate study streak (consecutive days with reviews from most recent)
+        report.study_streak = recent.iter().take_while(|(_, count)| *count > 0).count() as u32;
+
+        // Build query for deck-specific stats
+        let review_query = if deck == "*" {
+            "is:review".to_string()
+        } else {
+            format!("deck:\"{}\" is:review", deck)
+        };
+
+        let review_card_ids = self.client.cards().find(&review_query).await?;
+
+        if !review_card_ids.is_empty() {
+            let cards = self.client.cards().info(&review_card_ids).await?;
+
+            // Calculate retention and ease
+            let total_lapses: i64 = cards.iter().map(|c| c.lapses).sum();
+            let total_reps: i64 = cards.iter().map(|c| c.reps).sum();
+
+            if total_reps > 0 {
+                report.retention_rate = 1.0 - (total_lapses as f64 / total_reps as f64);
+            }
+
+            let ease_values: Vec<i64> = cards
+                .iter()
+                .filter(|c| c.ease_factor > 0)
+                .map(|c| c.ease_factor)
+                .collect();
+
+            if !ease_values.is_empty() {
+                report.average_ease =
+                    ease_values.iter().sum::<i64>() as f64 / ease_values.len() as f64;
+            }
+
+            // Find problem cards
+            for card in &cards {
+                // Leeches: 8+ lapses (Anki default)
+                if card.lapses >= 8 {
+                    report.leeches.push(card.card_id);
+                }
+                // Low ease: below 200% (2000)
+                if card.ease_factor > 0 && card.ease_factor < 2000 {
+                    report.low_ease_cards.push(card.card_id);
+                }
+            }
+
+            // Count relearning cards
+            report.relearning_cards = cards.iter().filter(|c| c.card_type == 3).count();
+        }
+
+        // Get cards studied in period (rated:N query)
+        if deck != "*" {
+            let rated_query = format!("deck:\"{}\" rated:{}", deck, days);
+            let rated_cards = self.client.cards().find(&rated_query).await?;
+
+            if !rated_cards.is_empty() {
+                let card_infos = self.client.cards().info(&rated_cards).await?;
+
+                // Count by type
+                for card in &card_infos {
+                    match card.card_type {
+                        0 => report.new_cards_studied += 1,
+                        2 => report.review_cards_studied += 1,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Get upcoming workload
+        let due_tomorrow_query = if deck == "*" {
+            "prop:due=1".to_string()
+        } else {
+            format!("deck:\"{}\" prop:due=1", deck)
+        };
+        let due_tomorrow_cards = self.client.cards().find(&due_tomorrow_query).await?;
+        report.due_tomorrow = due_tomorrow_cards.len();
+
+        let due_week_query = if deck == "*" {
+            "prop:due<=7".to_string()
+        } else {
+            format!("deck:\"{}\" prop:due<=7", deck)
+        };
+        let due_week_cards = self.client.cards().find(&due_week_query).await?;
+        report.due_this_week = due_week_cards.len();
+
+        Ok(report)
+    }
+}
+
+/// Comprehensive study report combining multiple statistics.
+///
+/// Provides a complete overview of study activity, performance, problem areas,
+/// and upcoming workload for a deck over a specified time period.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct StudyReport {
+    /// The deck name (or "*" for all decks).
+    pub deck: String,
+    /// Number of days covered by this report.
+    pub period_days: u32,
+
+    // Activity summary
+    /// Total number of reviews in the period.
+    pub total_reviews: usize,
+    /// Total time spent studying in minutes.
+    pub total_time_minutes: u64,
+    /// Average reviews per day.
+    pub average_reviews_per_day: f64,
+    /// Consecutive days with at least one review.
+    pub study_streak: u32,
+
+    // Performance metrics
+    /// Estimated retention rate (0.0 - 1.0).
+    pub retention_rate: f64,
+    /// Average ease factor (percentage * 10, e.g., 2500 = 250%).
+    pub average_ease: f64,
+
+    // Cards reviewed breakdown
+    /// Number of new cards studied in the period.
+    pub new_cards_studied: usize,
+    /// Number of review cards studied in the period.
+    pub review_cards_studied: usize,
+    /// Number of cards in relearning state.
+    pub relearning_cards: usize,
+
+    // Problem areas (card IDs)
+    /// Card IDs flagged as leeches (high lapses).
+    pub leeches: Vec<i64>,
+    /// Card IDs with low ease factor (below 200%).
+    pub low_ease_cards: Vec<i64>,
+
+    // Upcoming workload
+    /// Number of cards due tomorrow.
+    pub due_tomorrow: usize,
+    /// Number of cards due within the next 7 days.
+    pub due_this_week: usize,
+
+    // Daily breakdown
+    /// Statistics for each day in the period.
+    pub daily_stats: Vec<ReportDailyStats>,
+}
+
+/// Daily statistics for a study report.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ReportDailyStats {
+    /// Date in YYYY-MM-DD format.
+    pub date: String,
+    /// Number of reviews on this day.
+    pub reviews: usize,
 }
 
 /// Retention statistics for a deck.
