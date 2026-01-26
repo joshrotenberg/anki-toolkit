@@ -286,3 +286,49 @@ async fn test_answer_cards() {
 
     assert_eq!(result, vec![true, true]);
 }
+
+#[tokio::test]
+async fn test_set_due_date() {
+    let server = setup_mock_server().await;
+    mock_action(&server, "setDueDate", mock_anki_response(true)).await;
+
+    let client = AnkiClient::builder().url(server.uri()).build();
+    let result = client.cards().set_due_date(&[1, 2, 3], "0").await.unwrap();
+
+    assert!(result);
+}
+
+#[tokio::test]
+async fn test_set_due_date_range() {
+    let server = setup_mock_server().await;
+    mock_action(&server, "setDueDate", mock_anki_response(true)).await;
+
+    let client = AnkiClient::builder().url(server.uri()).build();
+    let result = client
+        .cards()
+        .set_due_date(&[1, 2, 3], "1-7")
+        .await
+        .unwrap();
+
+    assert!(result);
+}
+
+#[tokio::test]
+async fn test_set_specific_value() {
+    let server = setup_mock_server().await;
+    mock_action(
+        &server,
+        "setSpecificValueOfCard",
+        mock_anki_response(vec![true]),
+    )
+    .await;
+
+    let client = AnkiClient::builder().url(server.uri()).build();
+    let result = client
+        .cards()
+        .set_specific_value(1234567890, &["ivl"], &["30"], true)
+        .await
+        .unwrap();
+
+    assert_eq!(result, vec![true]);
+}

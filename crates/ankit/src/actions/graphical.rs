@@ -20,6 +20,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::client::AnkiClient;
 use crate::error::Result;
@@ -57,6 +58,21 @@ struct DeckParams<'a> {
 #[derive(Serialize)]
 struct ImportParams<'a> {
     path: &'a str,
+}
+
+#[derive(Serialize)]
+struct SelectCardParams {
+    card: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddNoteSetDataParams<'a> {
+    deck: &'a str,
+    model: &'a str,
+    fields: HashMap<&'a str, &'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tags: Option<&'a [&'a str]>,
 }
 
 /// Result of getting the current card.
@@ -226,5 +242,89 @@ impl<'a> GuiActions<'a> {
     /// Undo the last action.
     pub async fn undo(&self) -> Result<()> {
         self.client.invoke_void("guiUndo", ()).await
+    }
+
+    /// Select a specific card in the browser.
+    ///
+    /// Opens the browser if not already open and selects the specified card.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit::AnkiClient;
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    /// client.gui().select_card(1234567890).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn select_card(&self, card_id: i64) -> Result<bool> {
+        self.client
+            .invoke("guiSelectCard", SelectCardParams { card: card_id })
+            .await
+    }
+
+    /// Set data in the Add Cards dialog.
+    ///
+    /// This pre-fills the Add Cards dialog with the specified deck, model, fields, and tags.
+    /// The dialog must be open for this to work.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit::AnkiClient;
+    /// use std::collections::HashMap;
+    ///
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    ///
+    /// let mut fields = HashMap::new();
+    /// fields.insert("Front", "Question");
+    /// fields.insert("Back", "Answer");
+    ///
+    /// client.gui().add_note_set_data("Default", "Basic", fields, Some(&["tag1", "tag2"])).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn add_note_set_data(
+        &self,
+        deck: &str,
+        model: &str,
+        fields: HashMap<&str, &str>,
+        tags: Option<&[&str]>,
+    ) -> Result<()> {
+        self.client
+            .invoke_void(
+                "guiAddNoteSetData",
+                AddNoteSetDataParams {
+                    deck,
+                    model,
+                    fields,
+                    tags,
+                },
+            )
+            .await
+    }
+
+    /// Play audio associated with the current card.
+    ///
+    /// Plays audio on either the question or answer side.
+    ///
+    /// # Arguments
+    ///
+    /// * `side` - Either "question" or "answer"
+    pub async fn play_audio(&self, side: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct Params<'a> {
+            side: &'a str,
+        }
+        self.client
+            .invoke_void("guiPlayAudio", Params { side })
+            .await
+    }
+
+    /// Get the name of the currently active profile.
+    pub async fn active_profile(&self) -> Result<String> {
+        self.client.invoke_without_params("getActiveProfile").await
     }
 }

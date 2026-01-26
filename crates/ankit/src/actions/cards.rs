@@ -79,6 +79,21 @@ struct AnswerCardsParams<'a> {
     answers: &'a [CardAnswer],
 }
 
+#[derive(Serialize)]
+struct SetDueDateParams<'a> {
+    cards: &'a [i64],
+    days: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetSpecificValueParams<'a> {
+    card: i64,
+    keys: &'a [&'a str],
+    new_values: &'a [&'a str],
+    warning_check: bool,
+}
+
 impl<'a> CardActions<'a> {
     /// Find cards matching a query.
     ///
@@ -311,6 +326,92 @@ impl<'a> CardActions<'a> {
     pub async fn answer(&self, answers: &[CardAnswer]) -> Result<Vec<bool>> {
         self.client
             .invoke("answerCards", AnswerCardsParams { answers })
+            .await
+    }
+
+    /// Set the due date for cards.
+    ///
+    /// The `days` parameter can be:
+    /// - A number like `"0"` (due today), `"1"` (due tomorrow), `"-1"` (due yesterday)
+    /// - A range like `"0-3"` (randomly between today and 3 days from now)
+    /// - An exclamation mark suffix like `"1!"` to set as review cards instead of new
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit::AnkiClient;
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    ///
+    /// // Make cards due today
+    /// client.cards().set_due_date(&[1234567890], "0").await?;
+    ///
+    /// // Make cards due in 7 days
+    /// client.cards().set_due_date(&[1234567890], "7").await?;
+    ///
+    /// // Make cards due randomly between 1-7 days
+    /// client.cards().set_due_date(&[1234567890], "1-7").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn set_due_date(&self, card_ids: &[i64], days: &str) -> Result<bool> {
+        self.client
+            .invoke(
+                "setDueDate",
+                SetDueDateParams {
+                    cards: card_ids,
+                    days,
+                },
+            )
+            .await
+    }
+
+    /// Set specific internal values on a card.
+    ///
+    /// This is an advanced function for directly manipulating card database fields.
+    /// Use with caution as it can corrupt card data if used incorrectly.
+    ///
+    /// # Arguments
+    ///
+    /// * `card_id` - The card to modify
+    /// * `keys` - Field names to modify (e.g., `["ivl", "due"]`)
+    /// * `values` - New values for each field
+    /// * `warning_check` - If true, warns about potentially dangerous operations
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit::AnkiClient;
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    ///
+    /// // Set the interval to 30 days
+    /// client.cards().set_specific_value(
+    ///     1234567890,
+    ///     &["ivl"],
+    ///     &["30"],
+    ///     true
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn set_specific_value(
+        &self,
+        card_id: i64,
+        keys: &[&str],
+        values: &[&str],
+        warning_check: bool,
+    ) -> Result<Vec<bool>> {
+        self.client
+            .invoke(
+                "setSpecificValueOfCard",
+                SetSpecificValueParams {
+                    card: card_id,
+                    keys,
+                    new_values: values,
+                    warning_check,
+                },
+            )
             .await
     }
 }

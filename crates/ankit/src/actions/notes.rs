@@ -104,6 +104,35 @@ struct ReplaceTagsAllParams<'a> {
     replace_with_tag: &'a str,
 }
 
+#[derive(Serialize)]
+struct UpdateNoteParams<'a> {
+    note: UpdateNoteInner<'a>,
+}
+
+#[derive(Serialize)]
+struct UpdateNoteInner<'a> {
+    id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fields: Option<&'a HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tags: Option<&'a [String]>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateNoteModelParams<'a> {
+    note: i64,
+    model_name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    field_map: Option<&'a HashMap<String, String>>,
+}
+
+#[derive(Serialize)]
+struct UpdateNoteTagsParams<'a> {
+    note: i64,
+    tags: &'a [String],
+}
+
 impl<'a> NoteActions<'a> {
     /// Add a new note.
     ///
@@ -462,5 +491,137 @@ impl<'a> NoteActions<'a> {
         self.client
             .invoke_void("removeEmptyNotes", serde_json::json!({}))
             .await
+    }
+
+    /// Update a note's fields and/or tags in a single operation.
+    ///
+    /// More efficient than calling `update_fields` and tag operations separately.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit::AnkiClient;
+    /// # use std::collections::HashMap;
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    ///
+    /// let mut fields = HashMap::new();
+    /// fields.insert("Front".to_string(), "Updated question".to_string());
+    ///
+    /// let tags = vec!["updated".to_string(), "reviewed".to_string()];
+    ///
+    /// client.notes().update(1234567890, Some(&fields), Some(&tags)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn update(
+        &self,
+        note_id: i64,
+        fields: Option<&HashMap<String, String>>,
+        tags: Option<&[String]>,
+    ) -> Result<()> {
+        self.client
+            .invoke_void(
+                "updateNote",
+                UpdateNoteParams {
+                    note: UpdateNoteInner {
+                        id: note_id,
+                        fields,
+                        tags,
+                    },
+                },
+            )
+            .await
+    }
+
+    /// Change a note's model (note type) with optional field mapping.
+    ///
+    /// If `field_map` is provided, it maps old field names to new field names.
+    /// Fields not in the map will be discarded.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit::AnkiClient;
+    /// # use std::collections::HashMap;
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    ///
+    /// // Map old fields to new fields
+    /// let mut field_map = HashMap::new();
+    /// field_map.insert("Front".to_string(), "Question".to_string());
+    /// field_map.insert("Back".to_string(), "Answer".to_string());
+    ///
+    /// client.notes().update_model(1234567890, "New Model", Some(&field_map)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn update_model(
+        &self,
+        note_id: i64,
+        model_name: &str,
+        field_map: Option<&HashMap<String, String>>,
+    ) -> Result<()> {
+        self.client
+            .invoke_void(
+                "updateNoteModel",
+                UpdateNoteModelParams {
+                    note: note_id,
+                    model_name,
+                    field_map,
+                },
+            )
+            .await
+    }
+
+    /// Set all tags for a note, replacing any existing tags.
+    ///
+    /// Unlike `add_tags` and `remove_tags`, this atomically replaces all tags.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit::AnkiClient;
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    ///
+    /// let new_tags = vec!["vocabulary".to_string(), "chapter1".to_string()];
+    /// client.notes().set_tags(1234567890, &new_tags).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn set_tags(&self, note_id: i64, tags: &[String]) -> Result<()> {
+        self.client
+            .invoke_void(
+                "updateNoteTags",
+                UpdateNoteTagsParams {
+                    note: note_id,
+                    tags,
+                },
+            )
+            .await
+    }
+
+    /// Get all tags in the collection.
+    ///
+    /// Returns all tags that exist in any note.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit::AnkiClient;
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    ///
+    /// let all_tags = client.notes().all_tags().await?;
+    /// println!("Collection has {} tags", all_tags.len());
+    /// for tag in all_tags {
+    ///     println!("  {}", tag);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn all_tags(&self) -> Result<Vec<String>> {
+        self.client.invoke("getTags", serde_json::json!({})).await
     }
 }
