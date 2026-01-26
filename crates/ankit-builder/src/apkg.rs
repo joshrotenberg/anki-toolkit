@@ -112,8 +112,14 @@ impl ApkgBuilder {
                 .guid
                 .clone()
                 .unwrap_or_else(|| generate_guid(note_id));
-            let fields_str = note_def
-                .fields_ordered(model)
+
+            // Convert markdown fields to HTML before storing
+            let html_fields = note_def.fields_as_html(&model.markdown_fields);
+            let fields_str = model
+                .fields
+                .iter()
+                .map(|f| html_fields.get(f).cloned().unwrap_or_default())
+                .collect::<Vec<_>>()
                 .join(&FIELD_SEPARATOR.to_string());
             let sort_field = note_def
                 .fields_ordered(model)

@@ -18,6 +18,8 @@ connect = ["dep:ankit"]
 serde = { workspace = true, features = ["derive"] }
 toml = "0.8"
 thiserror.workspace = true
+pulldown-cmark = "0.12"
+html2md = "0.2"
 
 # apkg feature deps
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }

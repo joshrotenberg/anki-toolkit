@@ -124,7 +124,17 @@ impl ConnectImporter {
         for (i, note_def) in self.definition.notes.iter().enumerate() {
             let mut builder = NoteBuilder::new(&note_def.deck, &note_def.model);
 
-            for (field, value) in &note_def.fields {
+            // Get markdown fields for this model
+            let markdown_fields = self
+                .definition
+                .get_model(&note_def.model)
+                .map(|m| m.markdown_fields.clone())
+                .unwrap_or_default();
+
+            // Convert markdown to HTML for markdown fields
+            let fields = note_def.fields_as_html(&markdown_fields);
+
+            for (field, value) in &fields {
                 builder = builder.field(field, value);
             }
 
@@ -186,7 +196,18 @@ impl ConnectImporter {
             .iter()
             .map(|note_def| {
                 let mut builder = NoteBuilder::new(&note_def.deck, &note_def.model);
-                for (field, value) in &note_def.fields {
+
+                // Get markdown fields for this model
+                let markdown_fields = self
+                    .definition
+                    .get_model(&note_def.model)
+                    .map(|m| m.markdown_fields.clone())
+                    .unwrap_or_default();
+
+                // Convert markdown to HTML for markdown fields
+                let fields = note_def.fields_as_html(&markdown_fields);
+
+                for (field, value) in &fields {
                     builder = builder.field(field, value);
                 }
                 for tag in &note_def.tags {
