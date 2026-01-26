@@ -132,6 +132,87 @@ impl DeckDefinition {
     pub fn notes_for_deck(&self, deck_name: &str) -> impl Iterator<Item = &NoteDef> {
         self.notes.iter().filter(move |n| n.deck == deck_name)
     }
+
+    /// Convert HTML to Markdown in fields marked as `markdown_fields`.
+    ///
+    /// Call this after exporting from Anki to get cleaner, more readable TOML.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit_builder::DeckDefinition;
+    ///
+    /// # fn example() -> ankit_builder::Result<()> {
+    /// let mut definition = DeckDefinition::from_file("deck.toml")?;
+    /// definition.html_to_markdown();
+    /// definition.write_toml("deck_markdown.toml")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn html_to_markdown(&mut self) {
+        use crate::markdown::html_to_markdown;
+
+        for note in &mut self.notes {
+            if let Some(model) = self.models.iter().find(|m| m.name == note.model) {
+                for field_name in &model.markdown_fields {
+                    if let Some(value) = note.fields.get_mut(field_name) {
+                        *value = html_to_markdown(value);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Convert Markdown to HTML in fields marked as `markdown_fields`.
+    ///
+    /// Call this before importing to Anki to convert readable Markdown to HTML.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit_builder::DeckDefinition;
+    ///
+    /// # fn example() -> ankit_builder::Result<()> {
+    /// let mut definition = DeckDefinition::from_file("deck.toml")?;
+    /// definition.markdown_to_html();
+    /// // Now ready to import to Anki
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn markdown_to_html(&mut self) {
+        use crate::markdown::markdown_to_html;
+
+        for note in &mut self.notes {
+            if let Some(model) = self.models.iter().find(|m| m.name == note.model) {
+                for field_name in &model.markdown_fields {
+                    if let Some(value) = note.fields.get_mut(field_name) {
+                        *value = markdown_to_html(value);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Set markdown fields for a model.
+    ///
+    /// Convenience method to mark which fields should use Markdown format.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit_builder::DeckDefinition;
+    ///
+    /// # fn example() -> ankit_builder::Result<()> {
+    /// let mut definition = DeckDefinition::from_file("deck.toml")?;
+    /// definition.set_markdown_fields("Basic", &["Back", "Extra"]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn set_markdown_fields(&mut self, model_name: &str, fields: &[&str]) {
+        if let Some(model) = self.models.iter_mut().find(|m| m.name == model_name) {
+            model.markdown_fields = fields.iter().map(|s| s.to_string()).collect();
+        }
+    }
 }
 
 /// Package metadata.
@@ -180,6 +261,13 @@ pub struct ModelDef {
     /// Model ID (auto-generated if not specified).
     #[serde(default)]
     pub id: Option<i64>,
+
+    /// Fields that use Markdown format (converted to/from HTML).
+    ///
+    /// When pushing to Anki, markdown in these fields is converted to HTML.
+    /// When pulling from Anki, HTML in these fields is converted to markdown.
+    #[serde(default)]
+    pub markdown_fields: Vec<String>,
 }
 
 impl ModelDef {
@@ -258,6 +346,36 @@ impl NoteDef {
             String::new()
         } else {
             format!(" {} ", self.tags.join(" "))
+        }
+    }
+
+    /// Get fields with markdown converted to HTML for specified fields.
+    ///
+    /// Returns a new HashMap with markdown fields converted to HTML.
+    pub fn fields_as_html(&self, markdown_fields: &[String]) -> HashMap<String, String> {
+        use crate::markdown::markdown_to_html;
+
+        self.fields
+            .iter()
+            .map(|(name, value)| {
+                let converted = if markdown_fields.contains(name) {
+                    markdown_to_html(value)
+                } else {
+                    value.clone()
+                };
+                (name.clone(), converted)
+            })
+            .collect()
+    }
+
+    /// Convert HTML to markdown in specified fields (mutates in place).
+    pub fn convert_html_to_markdown(&mut self, markdown_fields: &[String]) {
+        use crate::markdown::html_to_markdown;
+
+        for field_name in markdown_fields {
+            if let Some(value) = self.fields.get_mut(field_name) {
+                *value = html_to_markdown(value);
+            }
         }
     }
 }
@@ -402,6 +520,7 @@ InvalidField = "X"
             css: None,
             sort_field: None,
             id: None,
+            markdown_fields: vec![],
         };
 
         let mut fields = HashMap::new();

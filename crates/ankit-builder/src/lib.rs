@@ -71,6 +71,7 @@
 #![warn(clippy::all)]
 
 pub mod error;
+pub mod markdown;
 pub mod schema;
 
 #[cfg(feature = "apkg")]

@@ -324,7 +324,12 @@ impl<'a> DeckSyncer<'a> {
                 ConflictResolution::PreferToml => {
                     // Push TOML values to Anki
                     match self
-                        .push_updates(modified.note_id, &modified.field_changes, &strategy)
+                        .push_updates(
+                            modified.note_id,
+                            &modified.model,
+                            &modified.field_changes,
+                            &strategy,
+                        )
                         .await
                     {
                         Ok(_) => {
@@ -394,12 +399,22 @@ impl<'a> DeckSyncer<'a> {
                 ))
             })?;
 
+        // Get markdown fields for this model
+        let markdown_fields = self
+            .definition
+            .get_model(&note_def.model)
+            .map(|m| m.markdown_fields.clone())
+            .unwrap_or_default();
+
+        // Convert markdown to HTML for markdown fields
+        let fields = note_def.fields_as_html(&markdown_fields);
+
         // Create the note in Anki
         let note =
             ankit::NoteBuilder::new(&note_def.deck, &note_def.model).tags(note_def.tags.clone());
 
         let mut note = note;
-        for (field, value) in &note_def.fields {
+        for (field, value) in &fields {
             note = note.field(field, value);
         }
 
@@ -420,26 +435,52 @@ impl<'a> DeckSyncer<'a> {
             .map(|(name, field)| (name, field.value))
             .collect();
 
-        Ok(NoteDef {
+        let mut note_def = NoteDef {
             deck: deck.to_string(),
-            model: note_info.model_name,
+            model: note_info.model_name.clone(),
             fields,
             tags: note_info.tags,
             guid: None,
-        })
+        };
+
+        // Convert HTML to markdown for markdown fields
+        let markdown_fields = self
+            .definition
+            .get_model(&note_info.model_name)
+            .map(|m| m.markdown_fields.clone())
+            .unwrap_or_default();
+
+        note_def.convert_html_to_markdown(&markdown_fields);
+
+        Ok(note_def)
     }
 
     /// Push field updates to Anki for conflict resolution.
     async fn push_updates(
         &self,
         note_id: i64,
+        model_name: &str,
         field_changes: &[FieldChange],
         strategy: &SyncStrategy,
     ) -> Result<()> {
-        // Build the fields to update (use TOML values)
+        // Get markdown fields for this model
+        let markdown_fields = self
+            .definition
+            .get_model(model_name)
+            .map(|m| m.markdown_fields.clone())
+            .unwrap_or_default();
+
+        // Build the fields to update (use TOML values, converting markdown if needed)
         let fields: HashMap<String, String> = field_changes
             .iter()
-            .map(|fc| (fc.field.clone(), fc.toml_value.clone()))
+            .map(|fc| {
+                let value = if markdown_fields.contains(&fc.field) {
+                    crate::markdown::markdown_to_html(&fc.toml_value)
+                } else {
+                    fc.toml_value.clone()
+                };
+                (fc.field.clone(), value)
+            })
             .collect();
 
         if !fields.is_empty() {
