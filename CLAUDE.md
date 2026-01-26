@@ -11,9 +11,9 @@ Rust toolkit for Anki deck management via AnkiConnect. Four crates in a workspac
 
 ## Current Status
 
-All crates complete and passing tests (139 integration + 88 doctests = 227 total).
+All crates complete and passing tests (448 total tests).
 
-## MCP Server Tools (46 total)
+## MCP Server Tools (50 total)
 
 ### Raw API - Notes (5)
 | Tool | Description | Write |
@@ -97,20 +97,32 @@ All crates complete and passing tests (139 integration + 88 doctests = 227 total
 | `enrich_note` | Update single note with content | Yes |
 | `enrich_notes` | Update multiple notes with content | Yes |
 
-### Engine Workflows - Deduplicate (4)
+### Engine Workflows - Deduplicate (3)
 | Tool | Description | Write |
 |------|-------------|-------|
 | `find_duplicates` | Find duplicate notes by key field | No |
 | `preview_deduplicate` | Preview deduplication results | No |
 | `remove_duplicates` | Remove duplicate notes | Yes |
 
+### TOML Builder (5)
+| Tool | Description | Write |
+|------|-------------|-------|
+| `export_deck_toml` | Export deck to TOML format | No |
+| `diff_deck_toml` | Compare TOML against Anki state | No |
+| `plan_sync_toml` | Preview sync without changes | No |
+| `sync_deck_toml` | Sync TOML with Anki (push/pull/bidirectional) | Yes |
+| `import_deck_toml` | Import TOML deck definition | Yes |
+
 ## CLI Options
 
 ```
---host <HOST>     AnkiConnect host [default: 127.0.0.1]
---port <PORT>     AnkiConnect port [default: 8765]
---read-only       Disable write operations
--v, --verbose     Logging level (-v=info, -vv=debug, -vvv=trace)
+--host <HOST>       AnkiConnect host [default: 127.0.0.1]
+--port <PORT>       AnkiConnect port [default: 8765]
+--transport <TYPE>  Transport type: stdio or http [default: stdio]
+--http-port <PORT>  HTTP server port [default: 3000]
+--http-host <HOST>  HTTP server host [default: 127.0.0.1]
+--read-only         Disable write operations
+-v, --verbose       Logging level (-v=info, -vv=debug, -vvv=trace)
 ```
 
 ## Testing the MCP Server
@@ -129,6 +141,7 @@ After restart, test these scenarios:
 10. **Organize**: `clone_deck`, `merge_decks`, `move_by_tag`
 11. **Media**: `audit_media`, `cleanup_media` (with dry_run=true first)
 12. **Sync**: `sync` - sync with AnkiWeb
+13. **TOML builder**: `export_deck_toml`, `diff_deck_toml`, `plan_sync_toml`, `sync_deck_toml`, `import_deck_toml`
 
 ## Key Files
 
