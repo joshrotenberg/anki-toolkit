@@ -259,6 +259,205 @@ impl<'a> ImportEngine<'a> {
 
         Ok(results)
     }
+
+    /// Smart add a single note with duplicate checking and tag suggestions.
+    ///
+    /// Combines validation, duplicate detection, and tag suggestions into
+    /// a single atomic operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - Note to add
+    /// * `options` - Options controlling duplicate handling and tag suggestions
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit_engine::{Engine, NoteBuilder};
+    /// # use ankit_engine::import::SmartAddOptions;
+    /// # async fn example() -> ankit_engine::Result<()> {
+    /// let engine = Engine::new();
+    ///
+    /// let note = NoteBuilder::new("Japanese", "Basic")
+    ///     .field("Front", "hello")
+    ///     .field("Back", "world")
+    ///     .build();
+    ///
+    /// let result = engine.import().smart_add(&note, SmartAddOptions::default()).await?;
+    ///
+    /// match result.status {
+    ///     ankit_engine::import::SmartAddStatus::Added => {
+    ///         println!("Added note: {:?}", result.note_id);
+    ///     }
+    ///     ankit_engine::import::SmartAddStatus::RejectedDuplicate { existing_id } => {
+    ///         println!("Duplicate of note {}", existing_id);
+    ///     }
+    ///     _ => {}
+    /// }
+    ///
+    /// if !result.suggested_tags.is_empty() {
+    ///     println!("Suggested tags: {:?}", result.suggested_tags);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn smart_add(&self, note: &Note, options: SmartAddOptions) -> Result<SmartAddResult> {
+        let mut result = SmartAddResult {
+            note_id: None,
+            status: SmartAddStatus::Added,
+            suggested_tags: Vec::new(),
+            similar_notes: Vec::new(),
+        };
+
+        // Check for empty fields if requested
+        if options.check_empty_fields {
+            let empty_fields: Vec<String> = note
+                .fields
+                .iter()
+                .filter(|(_, v)| v.trim().is_empty())
+                .map(|(k, _)| k.clone())
+                .collect();
+
+            if !empty_fields.is_empty() {
+                result.status = SmartAddStatus::RejectedEmptyFields {
+                    fields: empty_fields,
+                };
+                return Ok(result);
+            }
+        }
+
+        // Validate the note
+        let validation = self.validate(std::slice::from_ref(note)).await?;
+        if let Some(v) = validation.first() {
+            if !v.valid {
+                result.status = SmartAddStatus::RejectedInvalid {
+                    errors: v.errors.clone(),
+                };
+                return Ok(result);
+            }
+        }
+
+        // Check for duplicates using the model's first field
+        if options.check_duplicates {
+            // Get the model's field names to find the canonical "first" field
+            let model_fields = self.client.models().field_names(&note.model_name).await?;
+            let first_field_name = model_fields.first().cloned();
+
+            if let Some(field_name) = first_field_name {
+                if let Some(field_value) = note.fields.get(&field_name) {
+                    if !field_value.trim().is_empty() {
+                        // Search for notes with same first field value in the same deck
+                        let query = format!(
+                            "deck:\"{}\" \"{}:{}\"",
+                            note.deck_name,
+                            field_name,
+                            field_value.replace('\"', "\\\"")
+                        );
+
+                        let existing = self.client.notes().find(&query).await?;
+
+                        if !existing.is_empty() {
+                            result.similar_notes = existing.clone();
+
+                            // Collect tags from similar notes for suggestions
+                            if options.suggest_tags {
+                                let note_infos = self.client.notes().info(&existing).await?;
+                                let mut tag_counts: std::collections::HashMap<String, usize> =
+                                    std::collections::HashMap::new();
+
+                                for info in &note_infos {
+                                    for tag in &info.tags {
+                                        *tag_counts.entry(tag.clone()).or_insert(0) += 1;
+                                    }
+                                }
+
+                                // Sort by frequency and take top suggestions
+                                let mut tags: Vec<_> = tag_counts.into_iter().collect();
+                                tags.sort_by(|a, b| b.1.cmp(&a.1));
+                                result.suggested_tags = tags
+                                    .into_iter()
+                                    .take(5)
+                                    .map(|(tag, _)| tag)
+                                    .filter(|t| !note.tags.contains(t))
+                                    .collect();
+                            }
+
+                            if options.reject_on_duplicate {
+                                result.status = SmartAddStatus::RejectedDuplicate {
+                                    existing_id: existing[0],
+                                };
+                                return Ok(result);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Suggest tags from similar content even if no exact duplicates
+        if options.suggest_tags && result.suggested_tags.is_empty() {
+            // Search for notes in the same deck with the same model
+            let query = format!("deck:\"{}\" note:\"{}\"", note.deck_name, note.model_name);
+            let similar = self.client.notes().find(&query).await?;
+
+            if !similar.is_empty() {
+                // Sample up to 50 notes for tag suggestions
+                let sample: Vec<_> = similar.into_iter().take(50).collect();
+                let note_infos = self.client.notes().info(&sample).await?;
+
+                let mut tag_counts: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+
+                for info in &note_infos {
+                    for tag in &info.tags {
+                        *tag_counts.entry(tag.clone()).or_insert(0) += 1;
+                    }
+                }
+
+                // Sort by frequency and take top suggestions
+                let mut tags: Vec<_> = tag_counts.into_iter().collect();
+                tags.sort_by(|a, b| b.1.cmp(&a.1));
+                result.suggested_tags = tags
+                    .into_iter()
+                    .take(5)
+                    .map(|(tag, _)| tag)
+                    .filter(|t| !note.tags.contains(t))
+                    .collect();
+            }
+        }
+
+        // Add the note
+        let mut note_to_add = note.clone();
+
+        // If we found duplicates but aren't rejecting, allow the duplicate
+        if !result.similar_notes.is_empty() && !options.reject_on_duplicate {
+            let options = note_to_add.options.get_or_insert_with(Default::default);
+            options.allow_duplicate = Some(true);
+        }
+
+        match self.client.notes().add(note_to_add).await {
+            Ok(note_id) => {
+                result.note_id = Some(note_id);
+                if !result.similar_notes.is_empty() {
+                    result.status = SmartAddStatus::AddedWithWarning {
+                        warning: format!(
+                            "Potential duplicate of {} existing note(s)",
+                            result.similar_notes.len()
+                        ),
+                    };
+                } else {
+                    result.status = SmartAddStatus::Added;
+                }
+            }
+            Err(e) => {
+                result.status = SmartAddStatus::RejectedInvalid {
+                    errors: vec![e.to_string()],
+                };
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 /// Result of validating a single note.
@@ -268,4 +467,68 @@ pub struct ValidationResult {
     pub valid: bool,
     /// Validation errors, if any.
     pub errors: Vec<String>,
+}
+
+/// Options for smart add operation.
+#[derive(Debug, Clone)]
+pub struct SmartAddOptions {
+    /// Check for duplicate notes before adding.
+    pub check_duplicates: bool,
+    /// Suggest tags based on similar notes.
+    pub suggest_tags: bool,
+    /// Reject the note if a duplicate is found (otherwise add with warning).
+    pub reject_on_duplicate: bool,
+    /// Check for empty required fields.
+    pub check_empty_fields: bool,
+}
+
+impl Default for SmartAddOptions {
+    fn default() -> Self {
+        Self {
+            check_duplicates: true,
+            suggest_tags: true,
+            reject_on_duplicate: true,
+            check_empty_fields: true,
+        }
+    }
+}
+
+/// Status of a smart add operation.
+#[derive(Debug, Clone)]
+pub enum SmartAddStatus {
+    /// Note was successfully added.
+    Added,
+    /// Note was added despite being a potential duplicate.
+    AddedWithWarning {
+        /// Reason for the warning.
+        warning: String,
+    },
+    /// Note was rejected as a duplicate.
+    RejectedDuplicate {
+        /// ID of the existing duplicate note.
+        existing_id: i64,
+    },
+    /// Note was rejected due to empty required fields.
+    RejectedEmptyFields {
+        /// Names of empty fields.
+        fields: Vec<String>,
+    },
+    /// Note was rejected due to validation errors.
+    RejectedInvalid {
+        /// Validation error messages.
+        errors: Vec<String>,
+    },
+}
+
+/// Result of a smart add operation.
+#[derive(Debug, Clone)]
+pub struct SmartAddResult {
+    /// The note ID if successfully added, None if rejected.
+    pub note_id: Option<i64>,
+    /// Status of the operation.
+    pub status: SmartAddStatus,
+    /// Suggested tags based on similar notes.
+    pub suggested_tags: Vec<String>,
+    /// IDs of similar notes found (potential duplicates).
+    pub similar_notes: Vec<i64>,
 }
