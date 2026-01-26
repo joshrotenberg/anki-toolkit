@@ -266,3 +266,201 @@ async fn test_retention_stats_empty() {
     assert_eq!(stats.total_cards, 0);
     assert_eq!(stats.retention_rate, 0.0);
 }
+
+#[tokio::test]
+async fn test_deck_audit() {
+    let server = setup_mock_server().await;
+
+    // Mock findCards for card count
+    mock_action(
+        &server,
+        "findCards",
+        mock_anki_response(vec![1_i64, 2, 3, 4]),
+    )
+    .await;
+
+    // Mock cardsInfo for scheduling and model analysis
+    mock_action(
+        &server,
+        "cardsInfo",
+        mock_anki_response(vec![
+            serde_json::json!({
+                "cardId": 1_i64,
+                "noteId": 101_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 0, // new
+                "queue": 0,
+                "due": 0,
+                "interval": 0,
+                "factor": 0,
+                "reps": 0,
+                "lapses": 0,
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 2_i64,
+                "noteId": 102_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2, // review
+                "queue": 2,
+                "due": 0,
+                "interval": 30,
+                "factor": 2500,
+                "reps": 10,
+                "lapses": 1,
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 3_i64,
+                "noteId": 103_i64,
+                "deckName": "Japanese",
+                "modelName": "Cloze",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2, // review
+                "queue": -1, // suspended
+                "due": 0,
+                "interval": 10,
+                "factor": 2000,
+                "reps": 20,
+                "lapses": 10, // leech
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 4_i64,
+                "noteId": 104_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 1, // learning
+                "queue": 1,
+                "due": 0,
+                "interval": 1,
+                "factor": 2500,
+                "reps": 5,
+                "lapses": 0,
+                "left": 0,
+                "mod": 0
+            }),
+        ]),
+    )
+    .await;
+
+    // Mock findNotes for note count
+    mock_action(
+        &server,
+        "findNotes",
+        mock_anki_response(vec![101_i64, 102, 103, 104]),
+    )
+    .await;
+
+    // Mock notesInfo for tag and field analysis
+    mock_action(
+        &server,
+        "notesInfo",
+        mock_anki_response(vec![
+            serde_json::json!({
+                "noteId": 101_i64,
+                "modelName": "Basic",
+                "tags": ["vocabulary", "n5"],
+                "fields": {
+                    "Front": {"value": "hello", "order": 0},
+                    "Back": {"value": "world", "order": 1}
+                }
+            }),
+            serde_json::json!({
+                "noteId": 102_i64,
+                "modelName": "Basic",
+                "tags": ["vocabulary"],
+                "fields": {
+                    "Front": {"value": "goodbye", "order": 0},
+                    "Back": {"value": "", "order": 1} // empty field
+                }
+            }),
+            serde_json::json!({
+                "noteId": 103_i64,
+                "modelName": "Cloze",
+                "tags": [],  // untagged
+                "fields": {
+                    "Text": {"value": "test", "order": 0},
+                    "Extra": {"value": "", "order": 1} // empty field
+                }
+            }),
+            serde_json::json!({
+                "noteId": 104_i64,
+                "modelName": "Basic",
+                "tags": ["grammar"],
+                "fields": {
+                    "Front": {"value": "hello", "order": 0}, // duplicate of note 101
+                    "Back": {"value": "different", "order": 1}
+                }
+            }),
+        ]),
+    )
+    .await;
+
+    let engine = engine_for_mock(&server);
+    let audit = engine.analyze().deck_audit("Japanese").await.unwrap();
+
+    assert_eq!(audit.deck, "Japanese");
+    assert_eq!(audit.total_cards, 4);
+    assert_eq!(audit.total_notes, 4);
+
+    // Cards by model
+    assert_eq!(audit.cards_by_model.get("Basic"), Some(&3));
+    assert_eq!(audit.cards_by_model.get("Cloze"), Some(&1));
+
+    // Scheduling
+    assert_eq!(audit.new_cards, 1);
+    assert_eq!(audit.learning_cards, 1);
+    assert_eq!(audit.review_cards, 2);
+    assert_eq!(audit.suspended_count, 1);
+    assert_eq!(audit.leech_count, 1);
+
+    // Tags
+    assert_eq!(audit.tag_distribution.get("vocabulary"), Some(&2));
+    assert_eq!(audit.tag_distribution.get("n5"), Some(&1));
+    assert_eq!(audit.tag_distribution.get("grammar"), Some(&1));
+    assert_eq!(audit.untagged_notes, 1);
+
+    // Empty fields
+    assert_eq!(audit.empty_field_counts.get("Back"), Some(&1));
+    assert_eq!(audit.empty_field_counts.get("Extra"), Some(&1));
+
+    // Duplicates (note 101 and 104 have same "hello" in first field)
+    assert_eq!(audit.duplicate_count, 1);
+
+    // Average ease (only cards with ease > 0: 2500, 2000, 2500 = 2333.33)
+    assert!(audit.average_ease > 2300.0 && audit.average_ease < 2400.0);
+}
+
+#[tokio::test]
+async fn test_deck_audit_empty() {
+    let server = setup_mock_server().await;
+
+    // Mock findCards returning empty
+    mock_action(&server, "findCards", mock_anki_response(Vec::<i64>::new())).await;
+
+    let engine = engine_for_mock(&server);
+    let audit = engine.analyze().deck_audit("Empty").await.unwrap();
+
+    assert_eq!(audit.deck, "Empty");
+    assert_eq!(audit.total_cards, 0);
+    assert_eq!(audit.total_notes, 0);
+    assert!(audit.cards_by_model.is_empty());
+    assert!(audit.tag_distribution.is_empty());
+}

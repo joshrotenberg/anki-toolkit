@@ -3,6 +3,8 @@
 //! This module provides analytics workflows for understanding study
 //! patterns and identifying cards that need attention.
 
+use std::collections::HashMap;
+
 use crate::Result;
 use ankit::AnkiClient;
 use serde::Serialize;
@@ -285,6 +287,152 @@ impl<'a> AnalyzeEngine<'a> {
             },
         })
     }
+
+    /// Perform a comprehensive audit of a deck.
+    ///
+    /// Returns detailed information about deck contents including card counts,
+    /// tag distribution, empty fields, duplicates, and scheduling state.
+    ///
+    /// # Arguments
+    ///
+    /// * `deck` - Deck name to audit
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit_engine::Engine;
+    /// # async fn example() -> ankit_engine::Result<()> {
+    /// let engine = Engine::new();
+    /// let audit = engine.analyze().deck_audit("Japanese").await?;
+    ///
+    /// println!("Deck: {}", audit.deck);
+    /// println!("Total cards: {}", audit.total_cards);
+    /// println!("Total notes: {}", audit.total_notes);
+    /// println!("Leeches: {}", audit.leech_count);
+    /// println!("Suspended: {}", audit.suspended_count);
+    /// println!("New: {}, Learning: {}, Review: {}",
+    ///     audit.new_cards, audit.learning_cards, audit.review_cards);
+    ///
+    /// for (model, count) in &audit.cards_by_model {
+    ///     println!("  {}: {} cards", model, count);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn deck_audit(&self, deck: &str) -> Result<DeckAudit> {
+        let mut audit = DeckAudit {
+            deck: deck.to_string(),
+            ..Default::default()
+        };
+
+        let query = format!("deck:\"{}\"", deck);
+
+        // Get all cards in deck
+        let card_ids = self.client.cards().find(&query).await?;
+        audit.total_cards = card_ids.len();
+
+        if card_ids.is_empty() {
+            return Ok(audit);
+        }
+
+        // Get card info for scheduling and model analysis
+        let cards = self.client.cards().info(&card_ids).await?;
+
+        // Count by model and scheduling state
+        let mut ease_sum: i64 = 0;
+        let mut ease_count: usize = 0;
+
+        for card in &cards {
+            // Count by model
+            *audit
+                .cards_by_model
+                .entry(card.model_name.clone())
+                .or_insert(0) += 1;
+
+            // Count by scheduling state (card_type: 0=new, 1=learning, 2=review, 3=relearning)
+            match card.card_type {
+                0 => audit.new_cards += 1,
+                1 | 3 => audit.learning_cards += 1,
+                2 => audit.review_cards += 1,
+                _ => {}
+            }
+
+            // Check suspended (queue == -1)
+            if card.queue == -1 {
+                audit.suspended_count += 1;
+            }
+
+            // Check leech (high lapses, default threshold 8)
+            if card.lapses >= 8 {
+                audit.leech_count += 1;
+            }
+
+            // Accumulate ease for average
+            if card.ease_factor > 0 {
+                ease_sum += card.ease_factor;
+                ease_count += 1;
+            }
+        }
+
+        // Calculate average ease
+        if ease_count > 0 {
+            audit.average_ease = ease_sum as f64 / ease_count as f64;
+        }
+
+        // Get all notes in deck
+        let note_ids = self.client.notes().find(&query).await?;
+        audit.total_notes = note_ids.len();
+
+        if !note_ids.is_empty() {
+            let notes = self.client.notes().info(&note_ids).await?;
+
+            // Tag distribution and untagged count
+            for note in &notes {
+                if note.tags.is_empty() {
+                    audit.untagged_notes += 1;
+                } else {
+                    for tag in &note.tags {
+                        *audit.tag_distribution.entry(tag.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+
+            // Empty field analysis - collect all field names and check which are empty
+            let mut field_names: HashMap<String, bool> = HashMap::new();
+            for note in &notes {
+                for (field_name, field_value) in &note.fields {
+                    field_names.insert(field_name.clone(), true);
+                    if field_value.value.trim().is_empty() {
+                        *audit
+                            .empty_field_counts
+                            .entry(field_name.clone())
+                            .or_insert(0) += 1;
+                    }
+                }
+            }
+
+            // Duplicate detection - use first field as key
+            let mut seen_values: HashMap<String, usize> = HashMap::new();
+            for note in &notes {
+                // Get the first field value (sorted by order)
+                if let Some(first_field) = note
+                    .fields
+                    .values()
+                    .min_by_key(|f| f.order)
+                    .map(|f| f.value.trim().to_lowercase())
+                {
+                    if !first_field.is_empty() {
+                        *seen_values.entry(first_field).or_insert(0) += 1;
+                    }
+                }
+            }
+
+            // Count duplicates (values that appear more than once)
+            audit.duplicate_count = seen_values.values().filter(|&&count| count > 1).count();
+        }
+
+        Ok(audit)
+    }
 }
 
 /// Retention statistics for a deck.
@@ -302,4 +450,52 @@ pub struct RetentionStats {
     pub avg_interval: i64,
     /// Estimated retention rate (0.0 - 1.0).
     pub retention_rate: f64,
+}
+
+/// Comprehensive audit of a deck's contents and health.
+///
+/// Combines multiple analyses into a single report including card counts,
+/// tag distribution, empty fields, duplicates, and scheduling state.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DeckAudit {
+    /// The deck name.
+    pub deck: String,
+    /// Total number of cards.
+    pub total_cards: usize,
+    /// Total number of notes.
+    pub total_notes: usize,
+
+    // Card counts by model
+    /// Number of cards per note type (model).
+    pub cards_by_model: HashMap<String, usize>,
+
+    // Tag coverage
+    /// Number of notes per tag.
+    pub tag_distribution: HashMap<String, usize>,
+    /// Number of notes without any tags.
+    pub untagged_notes: usize,
+
+    // Field analysis
+    /// Number of notes with each field empty (field name -> count).
+    pub empty_field_counts: HashMap<String, usize>,
+
+    // Duplicates
+    /// Number of potential duplicate notes detected.
+    pub duplicate_count: usize,
+
+    // Problem cards
+    /// Number of leech cards (high lapses).
+    pub leech_count: usize,
+    /// Number of suspended cards.
+    pub suspended_count: usize,
+
+    // Scheduling summary
+    /// Number of new cards (never reviewed).
+    pub new_cards: usize,
+    /// Number of cards in learning phase.
+    pub learning_cards: usize,
+    /// Number of review cards.
+    pub review_cards: usize,
+    /// Average ease factor (percentage * 10, e.g., 2500 = 250%).
+    pub average_ease: f64,
 }
