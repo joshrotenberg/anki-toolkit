@@ -51,10 +51,26 @@
 //!
 //! - Anki must be running with the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on installed
 //! - By default, the client connects to `http://127.0.0.1:8765`
+//!
+//! # Query Builder
+//!
+//! Use the [`QueryBuilder`] for type-safe query construction:
+//!
+//! ```
+//! use ankit::QueryBuilder;
+//!
+//! let query = QueryBuilder::new()
+//!     .deck("Japanese")
+//!     .is_due()
+//!     .not_suspended()
+//!     .lapses_gte(3)
+//!     .build();
+//! ```
 
 pub mod actions;
 pub mod client;
 pub mod error;
+pub mod query;
 mod request;
 pub mod types;
 
@@ -69,3 +85,6 @@ pub use types::{
 
 // Re-export types from actions module
 pub use actions::{MultiAction, ReviewEntry};
+
+// Re-export query builder
+pub use query::{OrBuilder, QueryBuilder};
