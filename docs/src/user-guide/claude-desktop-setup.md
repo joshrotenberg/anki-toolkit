@@ -2,6 +2,12 @@
 
 Configure Claude Desktop to use the ankit MCP server.
 
+## Before You Start
+
+> **Warning**: The MCP server has full access to modify your Anki collection. This means Claude can delete notes, reset progress, and change your data permanently.
+>
+> **We strongly recommend starting with read-only mode** until you're comfortable with how the tools work. See [Read-Only Mode](#read-only-mode-recommended) below.
+
 ## Configuration File Location
 
 | Platform | Path |
@@ -39,7 +45,9 @@ Add the following to your config file:
 }
 ```
 
-### Read-Only Mode
+### Read-Only Mode (Recommended)
+
+**Start here!** Read-only mode lets you explore all the analysis and query tools without any risk of modifying your data:
 
 ```json
 {
@@ -51,6 +59,14 @@ Add the following to your config file:
   }
 }
 ```
+
+In read-only mode, you can:
+- Search and browse notes and cards
+- View deck statistics and health reports
+- Find duplicates and problem cards
+- Export data to JSON or TOML
+
+Write operations will be blocked with a clear error message. Once you're comfortable, remove the `--read-only` flag to enable full access.
 
 ### With Verbose Logging
 
