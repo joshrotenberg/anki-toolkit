@@ -1,21 +1,80 @@
 # ankit
 
-A Rust toolkit for programmatic Anki deck management via AnkiConnect.
+A comprehensive Rust toolkit for Anki deck management via AnkiConnect.
 
 [![License](https://img.shields.io/crates/l/ankit.svg)](https://github.com/joshrotenberg/ankit#license)
 
-## Crates
+## Overview
+
+ankit provides tools for managing Anki flashcard decks programmatically. Whether you're an **end user** wanting to manage decks through AI assistants, or a **developer** building Anki integrations, this toolkit has you covered.
+
+### Key Features
+
+- **50 MCP tools** for AI assistant integration (Claude, etc.)
+- **Complete AnkiConnect API** coverage with async Rust client
+- **TOML-based deck definitions** with .apkg generation
+- **High-level workflows**: bulk import, deduplication, analysis, media management
+- **Bidirectional sync** between TOML files and Anki
+
+## For Users: MCP Server
+
+The `ankit-mcp` server lets AI assistants (like Claude) manage your Anki decks directly.
+
+### Installation
+
+```bash
+cargo install ankit-mcp
+```
+
+### Setup with Claude Desktop
+
+Add to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json` on Linux/macOS):
+
+```json
+{
+  "mcpServers": {
+    "anki": {
+      "command": "ankit-mcp"
+    }
+  }
+}
+```
+
+### What You Can Do
+
+Once configured, ask Claude to:
+
+- **Create flashcards**: "Add a note to my Japanese deck with front 'hello' and back 'konnichiwa'"
+- **Search and analyze**: "Show me cards I'm struggling with in my Spanish deck"
+- **Bulk operations**: "Find and remove duplicate notes in my vocabulary deck"
+- **Import/export**: "Export my Japanese deck to a TOML file"
+- **Deck health**: "Give me a health report on my medical terminology deck"
+- **Media management**: "Find orphaned media files in my collection"
+
+### Available Tools (50 total)
+
+| Category | Tools |
+|----------|-------|
+| Notes | add, find, get info, update, delete |
+| Cards | find, get info, suspend, unsuspend, forget, set ease |
+| Tags | add, remove, replace, bulk operations |
+| Decks | list, create, delete, clone, merge |
+| Analysis | study summary, retention stats, find leeches, deck health |
+| Import/Export | bulk import, export to JSON/TOML, review history |
+| Deduplication | find duplicates, preview, remove |
+| Media | audit, cleanup orphaned files |
+| TOML Builder | import, export, diff, sync (bidirectional) |
+
+## For Developers: Rust Crates
 
 | Crate | Description | Crates.io |
 |-------|-------------|-----------|
 | [ankit](crates/ankit) | Complete async AnkiConnect API client | [![Crates.io](https://img.shields.io/crates/v/ankit.svg)](https://crates.io/crates/ankit) |
 | [ankit-engine](crates/ankit-engine) | High-level workflow operations | [![Crates.io](https://img.shields.io/crates/v/ankit-engine.svg)](https://crates.io/crates/ankit-engine) |
-| [ankit-builder](crates/ankit-builder) | TOML-based deck builder with .apkg generation | [![Crates.io](https://img.shields.io/crates/v/ankit-builder.svg)](https://crates.io/crates/ankit-builder) |
-| [ankit-mcp](crates/ankit-mcp) | MCP server for AI assistant integration | [![Crates.io](https://img.shields.io/crates/v/ankit-mcp.svg)](https://crates.io/crates/ankit-mcp) |
+| [ankit-builder](crates/ankit-builder) | TOML deck builder with .apkg generation | [![Crates.io](https://img.shields.io/crates/v/ankit-builder.svg)](https://crates.io/crates/ankit-builder) |
+| [ankit-mcp](crates/ankit-mcp) | MCP server for AI assistants | [![Crates.io](https://img.shields.io/crates/v/ankit-mcp.svg)](https://crates.io/crates/ankit-mcp) |
 
-## Quick Start
-
-For direct API access, use `ankit`:
+### Quick Start: API Client
 
 ```rust
 use ankit::{AnkiClient, NoteBuilder};
@@ -31,48 +90,89 @@ async fn main() -> ankit::Result<()> {
         .build();
     client.notes().add(note).await?;
 
+    // Search for notes
+    let notes = client.notes().find("deck:Default").await?;
+
     Ok(())
 }
 ```
 
-For high-level workflows, use `ankit-engine`:
+### Quick Start: High-Level Workflows
 
 ```rust
 use ankit_engine::Engine;
-use ankit_engine::import::OnDuplicate;
 
 #[tokio::main]
 async fn main() -> ankit_engine::Result<()> {
     let engine = Engine::new();
 
-    // Bulk import with duplicate handling
-    let notes = vec![/* ... */];
-    let report = engine.import().notes(&notes, OnDuplicate::Update).await?;
-
     // Analyze study patterns
     let stats = engine.analyze().study_summary("Japanese", 30).await?;
+    println!("Reviews: {}, Retention: {:.1}%",
+        stats.total_reviews, stats.retention_rate * 100.0);
+
+    // Find and remove duplicates
+    let report = engine.deduplicate().remove_duplicates(&query).await?;
+    println!("Removed {} duplicates", report.deleted);
 
     Ok(())
 }
 ```
 
-For TOML-based deck creation, use `ankit-builder`:
+### Quick Start: TOML Deck Builder
+
+Define decks in TOML:
+
+```toml
+[package]
+name = "Spanish Vocabulary"
+version = "1.0.0"
+
+[[models]]
+name = "Basic Spanish"
+fields = ["Spanish", "English"]
+markdown_fields = ["English"]  # Supports Markdown
+
+[[models.templates]]
+name = "Card 1"
+front = "{{Spanish}}"
+back = "{{English}}"
+
+[[decks]]
+name = "Spanish::Vocabulary"
+
+[[notes]]
+deck = "Spanish::Vocabulary"
+model = "Basic Spanish"
+tags = ["food"]
+
+[notes.fields]
+Spanish = "el gato"
+English = "the **cat**"
+```
+
+Generate .apkg or import via AnkiConnect:
 
 ```rust
 use ankit_builder::DeckBuilder;
 
 fn main() -> ankit_builder::Result<()> {
-    // Load deck definition and generate .apkg
     let builder = DeckBuilder::from_file("vocabulary.toml")?;
+
+    // Generate .apkg file
     builder.write_apkg("vocabulary.apkg")?;
+
+    // Or import directly via AnkiConnect
+    // builder.import_connect().await?;
+
     Ok(())
 }
 ```
 
 ## Requirements
 
-- [Anki](https://apps.ankiweb.net/) with [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on
-- Rust 1.85+ (Edition 2024)
+- [Anki](https://apps.ankiweb.net/) with [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on installed
+- Rust 1.85+ (for building from source)
 
 ## License
 

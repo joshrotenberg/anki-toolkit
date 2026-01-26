@@ -1,1 +1,8 @@
 target/
+
+# Claude Code local context
+CLAUDE.md
+.claude/
+
+# Generated documentation
+docs/book/
