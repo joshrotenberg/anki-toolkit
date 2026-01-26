@@ -16,14 +16,14 @@ connect = ["dep:ankit"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
-toml = "0.8"
+toml = "0.9"
 thiserror.workspace = true
-pulldown-cmark = "0.12"
+pulldown-cmark = "0.13"
 html2md = "0.2"
 
 # apkg feature deps
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
-zip = { version = "2.2", default-features = false, features = ["deflate"], optional = true }
+rusqlite = { version = "0.38", features = ["bundled"], optional = true }
+zip = { version = "7.2", default-features = false, features = ["deflate"], optional = true }
 tempfile = { version = "3.14", optional = true }
 serde_json = { workspace = true, optional = true }
 
@@ -34,6 +34,6 @@ tokio = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile = "3.14"
 tokio = { workspace = true, features = ["test-util", "rt-multi-thread", "macros"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
-zip = "2.2"
+rusqlite = { version = "0.38", features = ["bundled"] }
+zip = "7.2"
 serde_json.workspace = true

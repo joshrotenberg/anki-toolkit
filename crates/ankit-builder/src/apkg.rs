@@ -151,7 +151,7 @@ impl ApkgBuilder {
                 conn.execute(
                     "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data)
                      VALUES (?, ?, ?, ?, ?, -1, 0, 0, ?, 0, 0, 0, 0, 0, 0, 0, 0, '')",
-                    rusqlite::params![card_id, note_id, deck_id, ord, now, card_id_gen],
+                    rusqlite::params![card_id, note_id, deck_id, ord as i64, now, card_id_gen],
                 )?;
             }
         }
