@@ -15,7 +15,7 @@ Anki shows you flashcards just before you're about to forget them, making your s
 
 ## What is AnkiConnect?
 
-[AnkiConnect](https://ankiweb.net/shared/info/2055492159) is an Anki add-on that exposes a REST API, allowing external programs to interact with your Anki collection. ankit uses this API to manage your decks programmatically.
+[AnkiConnect](https://ankiweb.net/shared/info/2055492159) is an Anki add-on that exposes an HTTP API, allowing external programs to interact with your Anki collection. ankit uses this API to manage your decks programmatically.
 
 ## Who Is This For?
 
