@@ -12,6 +12,10 @@ pub enum Error {
     #[error("TOML parse error: {0}")]
     TomlParse(#[from] toml::de::Error),
 
+    /// TOML serialization error.
+    #[error("TOML serialize error: {0}")]
+    TomlSerialize(String),
+
     /// IO error.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

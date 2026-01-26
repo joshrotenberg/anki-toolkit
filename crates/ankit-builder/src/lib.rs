@@ -82,6 +82,9 @@ mod apkg;
 #[cfg(feature = "connect")]
 mod connect;
 
+#[cfg(feature = "connect")]
+mod export;
+
 pub use error::{Error, Result};
 pub use schema::{DeckDef, DeckDefinition, MediaDef, ModelDef, NoteDef, PackageInfo, TemplateDef};
 
@@ -90,6 +93,9 @@ pub use apkg::ApkgBuilder;
 
 #[cfg(feature = "connect")]
 pub use connect::{ConnectImporter, ImportResult};
+
+#[cfg(feature = "connect")]
+pub use export::DeckExporter;
 
 /// Unified builder that can output to either .apkg or AnkiConnect.
 ///
@@ -372,6 +378,60 @@ impl DeckBuilder {
     pub async fn import_connect_batch(&self) -> Result<ImportResult> {
         let importer = ConnectImporter::new(self.definition.clone());
         importer.import_batch().await
+    }
+
+    /// Export a deck from Anki to a [`DeckBuilder`].
+    ///
+    /// Fetches all notes in the specified deck from a running Anki instance
+    /// via AnkiConnect and creates a `DeckBuilder` that can be used to write
+    /// to TOML or .apkg files.
+    ///
+    /// # Requirements
+    ///
+    /// - Anki must be running with the AnkiConnect add-on installed
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit::AnkiClient;
+    /// use ankit_builder::DeckBuilder;
+    ///
+    /// # async fn example() -> ankit_builder::Result<()> {
+    /// let client = AnkiClient::new();
+    /// let builder = DeckBuilder::from_anki(&client, "Japanese::Vocabulary").await?;
+    ///
+    /// // Write to TOML
+    /// builder.definition().write_toml("japanese.toml")?;
+    ///
+    /// // Or write to .apkg
+    /// builder.write_apkg("japanese.apkg")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "connect")]
+    pub async fn from_anki(client: &ankit::AnkiClient, deck_name: &str) -> Result<Self> {
+        let exporter = DeckExporter::new(client);
+        let definition = exporter.export_deck(deck_name).await?;
+        Ok(Self::new(definition))
+    }
+
+    /// Write the deck definition to a TOML file.
+    ///
+    /// Convenience method that calls [`DeckDefinition::write_toml()`].
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit_builder::DeckBuilder;
+    ///
+    /// # fn main() -> ankit_builder::Result<()> {
+    /// let builder = DeckBuilder::from_file("deck.toml")?;
+    /// builder.write_toml("deck_copy.toml")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn write_toml(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        self.definition.write_toml(path)
     }
 }
 
