@@ -81,6 +81,64 @@ Write operations will be blocked with a clear error message. Once you're comfort
 }
 ```
 
+## Using Docker
+
+If you prefer Docker over installing the binary directly:
+
+### macOS/Windows
+
+```json
+{
+  "mcpServers": {
+    "anki": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "ghcr.io/joshrotenberg/ankit-mcp",
+        "--host", "host.docker.internal"
+      ]
+    }
+  }
+}
+```
+
+### Linux
+
+On Linux, use `--network host` to access AnkiConnect:
+
+```json
+{
+  "mcpServers": {
+    "anki": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "--network", "host",
+        "ghcr.io/joshrotenberg/ankit-mcp"
+      ]
+    }
+  }
+}
+```
+
+### Docker with Read-Only Mode
+
+```json
+{
+  "mcpServers": {
+    "anki": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "ghcr.io/joshrotenberg/ankit-mcp",
+        "--host", "host.docker.internal",
+        "--read-only"
+      ]
+    }
+  }
+}
+```
+
 ## Applying Changes
 
 After editing the configuration:
