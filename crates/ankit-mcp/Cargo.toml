@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "MCP server for Anki deck management via AnkiConnect"
-keywords = ["anki", "mcp", "model-context-protocol", "flashcards"]
+keywords = ["anki", "mcp", "mcp-server", "flashcards"]
 categories = ["command-line-utilities"]
 
 [[bin]]
