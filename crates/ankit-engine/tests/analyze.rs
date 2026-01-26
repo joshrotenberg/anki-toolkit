@@ -3,7 +3,9 @@
 mod common;
 
 use ankit_engine::analyze::ProblemCriteria;
-use common::{engine_for_mock, mock_action, mock_anki_response, setup_mock_server};
+use common::{
+    engine_for_mock, mock_action, mock_action_times, mock_anki_response, setup_mock_server,
+};
 
 #[tokio::test]
 async fn test_study_summary() {
@@ -463,4 +465,246 @@ async fn test_deck_audit_empty() {
     assert_eq!(audit.total_notes, 0);
     assert!(audit.cards_by_model.is_empty());
     assert!(audit.tag_distribution.is_empty());
+}
+
+#[tokio::test]
+async fn test_study_report() {
+    let server = setup_mock_server().await;
+
+    // Mock getNumCardsReviewedByDay - 3 consecutive days with reviews
+    mock_action(
+        &server,
+        "getNumCardsReviewedByDay",
+        mock_anki_response(vec![
+            vec![serde_json::json!("2024-01-15"), serde_json::json!(50)],
+            vec![serde_json::json!("2024-01-14"), serde_json::json!(30)],
+            vec![serde_json::json!("2024-01-13"), serde_json::json!(45)],
+        ]),
+    )
+    .await;
+
+    // Mock findCards - called 4 times (review, rated, due tomorrow, due week)
+    // All return the same card IDs for simplicity
+    mock_action_times(
+        &server,
+        "findCards",
+        mock_anki_response(vec![1_i64, 2, 3]),
+        4,
+    )
+    .await;
+
+    // Mock cardsInfo - called 2 times (review cards, rated cards)
+    mock_action_times(
+        &server,
+        "cardsInfo",
+        mock_anki_response(vec![
+            serde_json::json!({
+                "cardId": 1_i64,
+                "noteId": 101_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 10,
+                "factor": 2500,
+                "reps": 20,
+                "lapses": 1,
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 2_i64,
+                "noteId": 102_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 0, // new - for new_cards_studied count
+                "queue": 0,
+                "due": 0,
+                "interval": 5,
+                "factor": 1800, // Low ease - problem card
+                "reps": 15,
+                "lapses": 10, // High lapses - leech
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 3_i64,
+                "noteId": 103_i64,
+                "deckName": "Japanese",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 3, // relearning
+                "queue": 1,
+                "due": 0,
+                "interval": 1,
+                "factor": 2200,
+                "reps": 10,
+                "lapses": 3,
+                "left": 0,
+                "mod": 0
+            }),
+        ]),
+        2,
+    )
+    .await;
+
+    let engine = engine_for_mock(&server);
+    let report = engine.analyze().study_report("Japanese", 7).await.unwrap();
+
+    // Activity metrics
+    assert_eq!(report.deck, "Japanese");
+    assert_eq!(report.period_days, 7);
+    assert_eq!(report.total_reviews, 125); // 50+30+45
+    assert_eq!(report.study_streak, 3); // 3 consecutive days
+    assert!((report.average_reviews_per_day - 41.67).abs() < 0.1);
+
+    // Daily stats
+    assert_eq!(report.daily_stats.len(), 3);
+    assert_eq!(report.daily_stats[0].date, "2024-01-15");
+    assert_eq!(report.daily_stats[0].reviews, 50);
+
+    // Performance metrics
+    // retention = 1 - (14/45) = 0.689 (lapses: 1+10+3=14, reps: 20+15+10=45)
+    assert!(report.retention_rate > 0.68 && report.retention_rate < 0.70);
+    // avg_ease = (2500+1800+2200)/3 = 2166.67
+    assert!(report.average_ease > 2160.0 && report.average_ease < 2170.0);
+
+    // Problem cards
+    assert_eq!(report.leeches.len(), 1);
+    assert_eq!(report.leeches[0], 2); // card with 10 lapses
+    assert_eq!(report.low_ease_cards.len(), 1);
+    assert_eq!(report.low_ease_cards[0], 2); // card with 1800 ease
+
+    // Cards studied breakdown from cardsInfo mock:
+    // card 1: type=2 (review), card 2: type=0 (new), card 3: type=3 (relearning)
+    assert_eq!(report.new_cards_studied, 1);
+    assert_eq!(report.review_cards_studied, 1);
+    assert_eq!(report.relearning_cards, 1);
+
+    // Upcoming workload (same 3 cards returned for both queries)
+    assert_eq!(report.due_tomorrow, 3);
+    assert_eq!(report.due_this_week, 3);
+}
+
+#[tokio::test]
+async fn test_study_report_all_decks() {
+    let server = setup_mock_server().await;
+
+    // Mock getNumCardsReviewedByDay
+    mock_action(
+        &server,
+        "getNumCardsReviewedByDay",
+        mock_anki_response(vec![vec![
+            serde_json::json!("2024-01-15"),
+            serde_json::json!(100),
+        ]]),
+    )
+    .await;
+
+    // Mock findCards - called 3 times for all decks (review, due tomorrow, due week)
+    // No rated query for "*" deck
+    mock_action_times(&server, "findCards", mock_anki_response(vec![1_i64, 2]), 3).await;
+
+    // Mock cardsInfo for the review cards
+    mock_action(
+        &server,
+        "cardsInfo",
+        mock_anki_response(vec![
+            serde_json::json!({
+                "cardId": 1_i64,
+                "noteId": 101_i64,
+                "deckName": "Default",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 10,
+                "factor": 2500,
+                "reps": 10,
+                "lapses": 1,
+                "left": 0,
+                "mod": 0
+            }),
+            serde_json::json!({
+                "cardId": 2_i64,
+                "noteId": 102_i64,
+                "deckName": "Default",
+                "modelName": "Basic",
+                "question": "",
+                "answer": "",
+                "fields": {},
+                "type": 2,
+                "queue": 2,
+                "due": 0,
+                "interval": 20,
+                "factor": 2500,
+                "reps": 15,
+                "lapses": 2,
+                "left": 0,
+                "mod": 0
+            }),
+        ]),
+    )
+    .await;
+
+    let engine = engine_for_mock(&server);
+    let report = engine.analyze().study_report("*", 7).await.unwrap();
+
+    assert_eq!(report.deck, "*");
+    assert_eq!(report.total_reviews, 100);
+    // Same cards returned for all queries
+    assert_eq!(report.due_tomorrow, 2);
+    assert_eq!(report.due_this_week, 2);
+    // No rated query for all decks, so these stay 0
+    assert_eq!(report.new_cards_studied, 0);
+    assert_eq!(report.review_cards_studied, 0);
+    // Retention from the 2 review cards
+    assert!(report.retention_rate > 0.8);
+}
+
+#[tokio::test]
+async fn test_study_report_empty() {
+    let server = setup_mock_server().await;
+
+    // Mock getNumCardsReviewedByDay - no reviews
+    mock_action(
+        &server,
+        "getNumCardsReviewedByDay",
+        mock_anki_response(Vec::<(String, i64)>::new()),
+    )
+    .await;
+
+    // Mock findCards - called 4 times (review, rated, due tomorrow, due week)
+    // All return empty
+    mock_action_times(
+        &server,
+        "findCards",
+        mock_anki_response(Vec::<i64>::new()),
+        4,
+    )
+    .await;
+
+    let engine = engine_for_mock(&server);
+    let report = engine.analyze().study_report("Empty", 7).await.unwrap();
+
+    assert_eq!(report.deck, "Empty");
+    assert_eq!(report.total_reviews, 0);
+    assert_eq!(report.study_streak, 0);
+    assert_eq!(report.retention_rate, 0.0);
+    assert_eq!(report.average_ease, 0.0);
+    assert!(report.leeches.is_empty());
+    assert!(report.low_ease_cards.is_empty());
+    assert!(report.daily_stats.is_empty());
 }
