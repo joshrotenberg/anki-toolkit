@@ -82,6 +82,12 @@ mod apkg;
 #[cfg(feature = "connect")]
 mod connect;
 
+#[cfg(feature = "connect")]
+mod diff;
+
+#[cfg(feature = "connect")]
+mod export;
+
 pub use error::{Error, Result};
 pub use schema::{DeckDef, DeckDefinition, MediaDef, ModelDef, NoteDef, PackageInfo, TemplateDef};
 
@@ -90,6 +96,12 @@ pub use apkg::ApkgBuilder;
 
 #[cfg(feature = "connect")]
 pub use connect::{ConnectImporter, ImportResult};
+
+#[cfg(feature = "connect")]
+pub use diff::{DeckDiff, FieldChange, ModifiedNote, NoteDiff, TagChanges};
+
+#[cfg(feature = "connect")]
+pub use export::DeckExporter;
 
 /// Unified builder that can output to either .apkg or AnkiConnect.
 ///
@@ -372,6 +384,110 @@ impl DeckBuilder {
     pub async fn import_connect_batch(&self) -> Result<ImportResult> {
         let importer = ConnectImporter::new(self.definition.clone());
         importer.import_batch().await
+    }
+
+    /// Compare the TOML definition against the live state in Anki.
+    ///
+    /// Shows what's different between the TOML definition and Anki:
+    /// - Notes only in TOML (would be added on import)
+    /// - Notes only in Anki (exist in Anki but not in TOML)
+    /// - Modified notes (exist in both but have differences)
+    ///
+    /// Uses the first field value (normalized) as the key for matching notes.
+    ///
+    /// # Requirements
+    ///
+    /// - Anki must be running with the AnkiConnect add-on installed
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit_builder::DeckBuilder;
+    ///
+    /// # async fn example() -> ankit_builder::Result<()> {
+    /// let builder = DeckBuilder::from_file("deck.toml")?;
+    /// let diff = builder.diff_connect().await?;
+    ///
+    /// println!("Notes only in TOML: {}", diff.toml_only.len());
+    /// println!("Notes only in Anki: {}", diff.anki_only.len());
+    /// println!("Modified notes: {}", diff.modified.len());
+    /// println!("Unchanged notes: {}", diff.unchanged);
+    ///
+    /// for note in &diff.modified {
+    ///     println!("Modified: {} ({} field changes)",
+    ///         note.first_field, note.field_changes.len());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "connect")]
+    pub async fn diff_connect(&self) -> Result<DeckDiff> {
+        let client = ankit::AnkiClient::new();
+        self.diff_connect_with_client(&client).await
+    }
+
+    /// Compare the TOML definition against Anki using a custom client.
+    ///
+    /// Like [`diff_connect()`](Self::diff_connect) but allows using a custom
+    /// [`AnkiClient`](ankit::AnkiClient) with non-default settings.
+    #[cfg(feature = "connect")]
+    pub async fn diff_connect_with_client(&self, client: &ankit::AnkiClient) -> Result<DeckDiff> {
+        let differ = diff::DeckDiffer::new(client, &self.definition);
+        differ.diff().await
+    }
+
+    /// Export a deck from Anki to a [`DeckBuilder`].
+    ///
+    /// Fetches all notes in the specified deck from a running Anki instance
+    /// via AnkiConnect and creates a `DeckBuilder` that can be used to write
+    /// to TOML or .apkg files.
+    ///
+    /// # Requirements
+    ///
+    /// - Anki must be running with the AnkiConnect add-on installed
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit::AnkiClient;
+    /// use ankit_builder::DeckBuilder;
+    ///
+    /// # async fn example() -> ankit_builder::Result<()> {
+    /// let client = AnkiClient::new();
+    /// let builder = DeckBuilder::from_anki(&client, "Japanese::Vocabulary").await?;
+    ///
+    /// // Write to TOML
+    /// builder.definition().write_toml("japanese.toml")?;
+    ///
+    /// // Or write to .apkg
+    /// builder.write_apkg("japanese.apkg")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "connect")]
+    pub async fn from_anki(client: &ankit::AnkiClient, deck_name: &str) -> Result<Self> {
+        let exporter = DeckExporter::new(client);
+        let definition = exporter.export_deck(deck_name).await?;
+        Ok(Self::new(definition))
+    }
+
+    /// Write the deck definition to a TOML file.
+    ///
+    /// Convenience method that calls [`DeckDefinition::write_toml()`].
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit_builder::DeckBuilder;
+    ///
+    /// # fn main() -> ankit_builder::Result<()> {
+    /// let builder = DeckBuilder::from_file("deck.toml")?;
+    /// builder.write_toml("deck_copy.toml")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn write_toml(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        self.definition.write_toml(path)
     }
 }
 
