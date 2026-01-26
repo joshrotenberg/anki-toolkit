@@ -22,6 +22,7 @@ cohesive operations.
 - **Media** - Media file audit and cleanup
 - **Enrich** - Find and fill empty fields
 - **Deduplicate** - Find and remove duplicate notes
+- **Backup** - Deck backup and restore to .apkg files
 
 All features are enabled by default but can be individually disabled.
 
@@ -144,6 +145,29 @@ let preview = engine.media().cleanup_orphaned(true).await?;
 println!("Would delete {} files", preview.deleted.len());
 ```
 
+### Backup and Restore
+
+```rust
+use ankit_engine::Engine;
+
+let engine = Engine::new();
+
+// Backup a deck
+let result = engine.backup()
+    .backup_deck("Japanese", "/home/user/backups")
+    .await?;
+println!("Backed up to: {}", result.path.display());
+
+// Restore from backup
+let restore = engine.backup()
+    .restore_deck(&result.path)
+    .await?;
+
+// List and rotate backups
+let backups = engine.backup().list_backups("/home/user/backups").await?;
+engine.backup().rotate_backups("/home/user/backups", 5).await?; // Keep last 5
+```
+
 ## Feature Flags
 
 All workflow modules are enabled by default. To use only specific features:
@@ -153,7 +177,7 @@ All workflow modules are enabled by default. To use only specific features:
 ankit-engine = { version = "0.1", default-features = false, features = ["analyze", "import"] }
 ```
 
-Available features: `import`, `export`, `organize`, `analyze`, `migrate`, `media`, `progress`, `enrich`, `deduplicate`
+Available features: `import`, `export`, `organize`, `analyze`, `migrate`, `media`, `progress`, `enrich`, `deduplicate`, `backup`
 
 ## Related Crates
 

@@ -41,6 +41,7 @@
 //! - `progress` - Card state management and performance tagging
 //! - `enrich` - Find and update notes with empty fields
 //! - `deduplicate` - Duplicate detection and removal
+//! - `backup` - Deck backup and restore to .apkg files
 
 mod error;
 
@@ -70,6 +71,9 @@ pub mod enrich;
 
 #[cfg(feature = "deduplicate")]
 pub mod deduplicate;
+
+#[cfg(feature = "backup")]
+pub mod backup;
 
 pub use error::{Error, Result};
 
@@ -107,6 +111,9 @@ use enrich::EnrichEngine;
 
 #[cfg(feature = "deduplicate")]
 use deduplicate::DeduplicateEngine;
+
+#[cfg(feature = "backup")]
+use backup::BackupEngine;
 
 /// High-level workflow engine for Anki operations.
 ///
@@ -230,6 +237,14 @@ impl Engine {
     #[cfg(feature = "deduplicate")]
     pub fn deduplicate(&self) -> DeduplicateEngine<'_> {
         DeduplicateEngine::new(&self.client)
+    }
+
+    /// Access backup and restore workflows.
+    ///
+    /// Provides deck backup to .apkg files and restore operations.
+    #[cfg(feature = "backup")]
+    pub fn backup(&self) -> BackupEngine<'_> {
+        BackupEngine::new(&self.client)
     }
 }
 

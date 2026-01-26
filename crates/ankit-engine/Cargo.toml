@@ -10,7 +10,7 @@ keywords = ["anki", "flashcards", "spaced-repetition", "ankiconnect"]
 categories = ["api-bindings", "asynchronous"]
 
 [features]
-default = ["import", "export", "organize", "analyze", "migrate", "media", "progress", "enrich", "deduplicate"]
+default = ["import", "export", "organize", "analyze", "migrate", "media", "progress", "enrich", "deduplicate", "backup"]
 import = []
 export = []
 organize = []
@@ -20,6 +20,7 @@ media = []
 progress = []
 enrich = []
 deduplicate = []
+backup = []
 
 [dependencies]
 ankit.workspace = true
@@ -32,3 +33,4 @@ regex-lite = "0.1"
 [dev-dependencies]
 wiremock.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+tempfile = "3"

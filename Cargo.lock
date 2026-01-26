@@ -84,6 +84,7 @@ dependencies = [
  "regex-lite",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "wiremock",

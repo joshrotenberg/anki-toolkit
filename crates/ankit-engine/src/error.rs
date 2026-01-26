@@ -62,12 +62,19 @@ pub enum Error {
 
     /// A validation error occurred.
     Validation(String),
+
+    /// An I/O error occurred.
+    Io(std::io::Error),
+
+    /// A backup operation failed.
+    Backup(String),
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Client(e) => Some(e),
+            Error::Io(e) => Some(e),
             _ => None,
         }
     }
@@ -85,7 +92,15 @@ impl fmt::Display for Error {
             Error::NoNotesFound(query) => write!(f, "no notes found for query: {}", query),
             Error::Cancelled => write!(f, "operation cancelled"),
             Error::Validation(msg) => write!(f, "validation error: {}", msg),
+            Error::Io(e) => write!(f, "I/O error: {}", e),
+            Error::Backup(msg) => write!(f, "backup error: {}", msg),
         }
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Error::Io(err)
     }
 }
 
