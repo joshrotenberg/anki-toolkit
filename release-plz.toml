@@ -4,10 +4,13 @@ changelog_update = true
 pr_labels = ["release"]
 
 [[package]]
-name = "yanki"
+name = "ankit"
 
 [[package]]
-name = "yanki-engine"
+name = "ankit-engine"
 
 [[package]]
-name = "yanki-mcp"
+name = "ankit-mcp"
+
+[[package]]
+name = "ankit-builder"

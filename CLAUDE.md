@@ -228,7 +228,7 @@ Pattern: Raw API tools call `self.engine.client().{module}()`, workflow tools ca
 
 ### Workspace Structure (Complete)
 
-The project has been renamed from `yanki` to `ankit`:
+The workspace contains these crates:
 - `ankit` - Core AnkiConnect client
 - `ankit-engine` - High-level workflows
 - `ankit-mcp` - MCP server
@@ -311,37 +311,26 @@ let result = builder.import_connect().await?;
 - Media file support with manifest
 - Full validation before generation
 
-### Potential Raw API Additions
+## Roadmap
 
-**Card operations** (from yanki cards.rs):
-- `get_ease` - Get ease factors for cards
-- `relearn_cards` - Put cards back into learning queue
-- `answer_cards` - Answer cards programmatically
-- `are_suspended` / `are_due` - Check card states
+Work is tracked via GitHub issues: https://github.com/joshrotenberg/anki-toolkit/issues
 
-**Additional tag operations**:
-- `get_tags` - Get tags for a note
-- `replace_tags` - Replace tag on specific notes (not global)
+### API Coverage (~85%)
 
-### Potential Workflow Ideas
+**Implemented:** 79 actions
 
-**Implemented:**
-1. `convert_note_type` - Via `migrate` module: convert notes between models with field mapping, preserve tags and deck location
-2. `enrich_notes` - Via `enrich` module: find notes with empty fields, update with new content
-3. `deduplicate_notes` - Via `deduplicate` module: find and remove duplicates based on key field, with keep strategies (first, last, most_content, most_tags)
+**Missing (tracked in issues #1-4):**
+- Card: `setDueDate`, `setSpecificValueOfCard` (#1)
+- Note: `updateNote`, `updateNoteModel`, `updateNoteTags`, `getTags` (#2)
+- Model: `findModelsById`, `findModelsByName`, template manipulation (#3)
+- GUI: `guiSelectCard`, `guiAddNoteSetData`, `guiPlayAudio`, `getActiveProfile` (#4)
 
-**Backup Workflows (planned - would use genanki-rs):**
-- `backup_deck` - Export deck to .apkg file with media
-- `restore_deck` - Import deck from .apkg backup
-- `backup_collection` - Full collection snapshot
-- `list_backups` - List available backups with metadata
+### Planned Features
 
-**Other ideas:**
-- `smart_suspend` - AI-assisted suspension based on content similarity
-- `deck_comparison` - Compare two decks for overlap/differences
-- `study_plan` - Generate study recommendations based on due cards
-
-### Other
-- Tool registry with read/write metadata
-- CLI tool (yanki-cli)
-- Web UI for workflow management
+| Feature | Issue | Priority |
+|---------|-------|----------|
+| Backup workflows | #5 | High |
+| CLI tool (ankit-cli) | #6 | Medium |
+| smart_suspend workflow | #7 | Low |
+| deck_comparison workflow | #8 | Low |
+| study_plan workflow | #9 | Low |

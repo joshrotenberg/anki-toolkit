@@ -1,25 +1,27 @@
-# yanki
+# ankit
 
 A Rust toolkit for programmatic Anki deck management via AnkiConnect.
 
-[![License](https://img.shields.io/crates/l/yanki.svg)](https://github.com/joshrotenberg/yanki#license)
+[![License](https://img.shields.io/crates/l/ankit.svg)](https://github.com/joshrotenberg/ankit#license)
 
 ## Crates
 
 | Crate | Description | Crates.io |
 |-------|-------------|-----------|
-| [yanki](crates/yanki) | Complete async AnkiConnect API client | [![Crates.io](https://img.shields.io/crates/v/yanki.svg)](https://crates.io/crates/yanki) |
-| [yanki-engine](crates/yanki-engine) | High-level workflow operations | [![Crates.io](https://img.shields.io/crates/v/yanki-engine.svg)](https://crates.io/crates/yanki-engine) |
+| [ankit](crates/ankit) | Complete async AnkiConnect API client | [![Crates.io](https://img.shields.io/crates/v/ankit.svg)](https://crates.io/crates/ankit) |
+| [ankit-engine](crates/ankit-engine) | High-level workflow operations | [![Crates.io](https://img.shields.io/crates/v/ankit-engine.svg)](https://crates.io/crates/ankit-engine) |
+| [ankit-builder](crates/ankit-builder) | TOML-based deck builder with .apkg generation | [![Crates.io](https://img.shields.io/crates/v/ankit-builder.svg)](https://crates.io/crates/ankit-builder) |
+| [ankit-mcp](crates/ankit-mcp) | MCP server for AI assistant integration | [![Crates.io](https://img.shields.io/crates/v/ankit-mcp.svg)](https://crates.io/crates/ankit-mcp) |
 
 ## Quick Start
 
-For direct API access, use `yanki`:
+For direct API access, use `ankit`:
 
 ```rust
-use yanki::{AnkiClient, NoteBuilder};
+use ankit::{AnkiClient, NoteBuilder};
 
 #[tokio::main]
-async fn main() -> yanki::Result<()> {
+async fn main() -> ankit::Result<()> {
     let client = AnkiClient::new();
 
     // Add a note
@@ -33,14 +35,14 @@ async fn main() -> yanki::Result<()> {
 }
 ```
 
-For high-level workflows, use `yanki-engine`:
+For high-level workflows, use `ankit-engine`:
 
 ```rust
-use yanki_engine::Engine;
-use yanki_engine::import::OnDuplicate;
+use ankit_engine::Engine;
+use ankit_engine::import::OnDuplicate;
 
 #[tokio::main]
-async fn main() -> yanki_engine::Result<()> {
+async fn main() -> ankit_engine::Result<()> {
     let engine = Engine::new();
 
     // Bulk import with duplicate handling
@@ -50,6 +52,19 @@ async fn main() -> yanki_engine::Result<()> {
     // Analyze study patterns
     let stats = engine.analyze().study_summary("Japanese", 30).await?;
 
+    Ok(())
+}
+```
+
+For TOML-based deck creation, use `ankit-builder`:
+
+```rust
+use ankit_builder::DeckBuilder;
+
+fn main() -> ankit_builder::Result<()> {
+    // Load deck definition and generate .apkg
+    let builder = DeckBuilder::from_file("vocabulary.toml")?;
+    builder.write_apkg("vocabulary.apkg")?;
     Ok(())
 }
 ```
