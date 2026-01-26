@@ -1,4 +1,30 @@
 //! Error types for ankit-engine.
+//!
+//! Errors from engine workflows fall into two categories:
+//!
+//! 1. **Client errors**: Wrapped from the underlying [`ankit::Error`] type
+//! 2. **Workflow errors**: Specific to engine operations (e.g., deck not found)
+//!
+//! # Example
+//!
+//! ```no_run
+//! use ankit_engine::{Engine, Error};
+//!
+//! # async fn example() {
+//! let engine = Engine::new();
+//!
+//! match engine.analyze().study_summary("NonexistentDeck", 7).await {
+//!     Ok(stats) => println!("Reviews: {}", stats.total_reviews),
+//!     Err(Error::DeckNotFound(name)) => {
+//!         eprintln!("Deck '{}' not found", name);
+//!     }
+//!     Err(Error::Client(ankit::Error::ConnectionRefused)) => {
+//!         eprintln!("Is Anki running?");
+//!     }
+//!     Err(e) => eprintln!("Error: {}", e),
+//! }
+//! # }
+//! ```
 
 use std::fmt;
 
@@ -6,6 +32,9 @@ use std::fmt;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Errors that can occur during engine operations.
+///
+/// Engine errors wrap lower-level client errors and add workflow-specific
+/// error variants for common failure cases.
 #[derive(Debug)]
 pub enum Error {
     /// An error from the underlying ankit client.

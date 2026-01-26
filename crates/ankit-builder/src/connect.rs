@@ -1,6 +1,35 @@
 //! AnkiConnect import functionality.
 //!
-//! Imports deck definitions directly into a running Anki instance via AnkiConnect.
+//! This module provides [`ConnectImporter`] for importing deck definitions directly
+//! into a running Anki instance via AnkiConnect.
+//!
+//! # Requirements
+//!
+//! - Anki must be running
+//! - The [AnkiConnect](https://foosoft.net/projects/anki-connect/) add-on must be installed
+//! - Note types (models) referenced in the definition must already exist in Anki
+//!
+//! # Example
+//!
+//! ```no_run
+//! use ankit_builder::{ConnectImporter, DeckDefinition};
+//!
+//! # async fn example() -> ankit_builder::Result<()> {
+//! let definition = DeckDefinition::from_file("vocabulary.toml")?;
+//! let importer = ConnectImporter::new(definition);
+//!
+//! // Optionally validate before importing
+//! let missing_models = importer.validate_models().await?;
+//! if !missing_models.is_empty() {
+//!     eprintln!("Missing models: {:?}", missing_models);
+//!     return Ok(());
+//! }
+//!
+//! let result = importer.import().await?;
+//! println!("Created {} notes", result.notes_created);
+//! # Ok(())
+//! # }
+//! ```
 
 use std::collections::HashMap;
 
@@ -9,7 +38,21 @@ use ankit::{AnkiClient, NoteBuilder};
 use crate::error::{Error, Result};
 use crate::schema::DeckDefinition;
 
-/// Builder for importing decks via AnkiConnect.
+/// Imports deck definitions into Anki via AnkiConnect.
+///
+/// `ConnectImporter` handles the live import of notes into a running Anki
+/// instance. It automatically creates missing decks but requires that all
+/// referenced note types (models) already exist.
+///
+/// # Import Methods
+///
+/// - [`import()`](Self::import): Adds notes one at a time (safer, better error tracking)
+/// - [`import_batch()`](Self::import_batch): Adds all notes in a single call (faster)
+///
+/// # Validation
+///
+/// Use [`validate_models()`](Self::validate_models) and [`validate_decks()`](Self::validate_decks)
+/// to check prerequisites before importing.
 pub struct ConnectImporter {
     definition: DeckDefinition,
     client: AnkiClient,
@@ -170,6 +213,32 @@ impl ConnectImporter {
     }
 
     /// Check if all required models exist in Anki.
+    ///
+    /// Returns a list of model names that are defined in the TOML but do not
+    /// exist in Anki. An empty list means all models are available.
+    ///
+    /// Unlike decks, models cannot be created automatically and must exist
+    /// before import. Use this to warn users or fail early.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit_builder::{ConnectImporter, DeckDefinition};
+    ///
+    /// # async fn example() -> ankit_builder::Result<()> {
+    /// let definition = DeckDefinition::from_file("deck.toml")?;
+    /// let importer = ConnectImporter::new(definition);
+    ///
+    /// let missing = importer.validate_models().await?;
+    /// if !missing.is_empty() {
+    ///     eprintln!("Please create these note types in Anki first:");
+    ///     for model in &missing {
+    ///         eprintln!("  - {}", model);
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn validate_models(&self) -> Result<Vec<String>> {
         let existing_models = self.client.models().names().await?;
         let missing: Vec<String> = self
@@ -183,6 +252,29 @@ impl ConnectImporter {
     }
 
     /// Check if all required decks exist in Anki.
+    ///
+    /// Returns a list of deck names that are defined in the TOML but do not
+    /// exist in Anki. An empty list means all decks are available.
+    ///
+    /// Note that [`import()`](Self::import) automatically creates missing decks,
+    /// so this is mainly useful for informational purposes.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit_builder::{ConnectImporter, DeckDefinition};
+    ///
+    /// # async fn example() -> ankit_builder::Result<()> {
+    /// let definition = DeckDefinition::from_file("deck.toml")?;
+    /// let importer = ConnectImporter::new(definition);
+    ///
+    /// let missing = importer.validate_decks().await?;
+    /// if !missing.is_empty() {
+    ///     println!("Will create {} new decks", missing.len());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn validate_decks(&self) -> Result<Vec<String>> {
         let existing_decks = self.client.decks().names().await?;
         let missing: Vec<String> = self
