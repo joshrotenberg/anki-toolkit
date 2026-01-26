@@ -276,6 +276,7 @@ impl<'a> DeckExporter<'a> {
             sort_field: None,
             id: None,
             markdown_fields: vec![],
+            model_type: None,
         })
     }
 }

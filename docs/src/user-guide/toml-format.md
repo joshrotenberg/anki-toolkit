@@ -34,7 +34,7 @@ back = "{{FrontSide}}<hr>{{Back}}" # Required: back template
 
 ### Multiple Templates
 
-For reverse cards or cloze deletions:
+For reverse cards:
 
 ```toml
 [[models]]
@@ -51,6 +51,38 @@ name = "Card 2 (reversed)"
 front = "{{Back}}"
 back = "{{Front}}"
 ```
+
+### Cloze Models
+
+For cloze deletion cards, set `model_type = "cloze"`:
+
+```toml
+[[models]]
+name = "My Cloze"
+model_type = "cloze"
+fields = ["Text", "Extra"]
+
+[[models.templates]]
+name = "Cloze"
+front = "{{cloze:Text}}"
+back = "{{cloze:Text}}<br>{{Extra}}"
+```
+
+Use cloze syntax in your notes:
+
+```toml
+[[notes]]
+deck = "Vocabulary"
+model = "My Cloze"
+
+[notes.fields]
+Text = "The {{c1::mitochondria}} is the powerhouse of the {{c2::cell}}."
+Extra = "Biology 101"
+```
+
+This creates two cards:
+- Card 1: "The [...] is the powerhouse of the cell."
+- Card 2: "The mitochondria is the powerhouse of the [...]."
 
 ## Decks Section
 

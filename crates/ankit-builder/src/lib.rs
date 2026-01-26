@@ -70,6 +70,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+pub mod cloze;
 pub mod error;
 pub mod markdown;
 pub mod schema;

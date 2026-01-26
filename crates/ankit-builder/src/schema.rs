@@ -268,6 +268,47 @@ pub struct ModelDef {
     /// When pulling from Anki, HTML in these fields is converted to markdown.
     #[serde(default)]
     pub markdown_fields: Vec<String>,
+
+    /// Model type: "standard" (default) or "cloze".
+    ///
+    /// When set to "cloze", templates are optional and a default cloze template is used.
+    #[serde(default)]
+    pub model_type: Option<String>,
+}
+
+impl ModelDef {
+    /// Create a new cloze model with default template.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use ankit_builder::ModelDef;
+    ///
+    /// let model = ModelDef::cloze("My Cloze Model", vec!["Text", "Extra"]);
+    /// assert_eq!(model.name, "My Cloze Model");
+    /// assert!(model.is_cloze());
+    /// ```
+    pub fn cloze(name: impl Into<String>, fields: Vec<impl Into<String>>) -> Self {
+        Self {
+            name: name.into(),
+            fields: fields.into_iter().map(Into::into).collect(),
+            templates: vec![TemplateDef {
+                name: "Cloze".to_string(),
+                front: "{{cloze:Text}}".to_string(),
+                back: "{{cloze:Text}}<br>{{Extra}}".to_string(),
+            }],
+            css: None,
+            sort_field: None,
+            id: None,
+            markdown_fields: vec![],
+            model_type: Some("cloze".to_string()),
+        }
+    }
+
+    /// Check if this is a cloze model.
+    pub fn is_cloze(&self) -> bool {
+        self.model_type.as_deref() == Some("cloze")
+    }
 }
 
 impl ModelDef {
@@ -525,6 +566,7 @@ InvalidField = "X"
             sort_field: None,
             id: None,
             markdown_fields: vec![],
+            model_type: None,
         };
 
         let mut fields = HashMap::new();
@@ -543,5 +585,58 @@ InvalidField = "X"
 
         let ordered = note.fields_ordered(&model);
         assert_eq!(ordered, vec!["first", "", "third"]);
+    }
+
+    #[test]
+    fn test_cloze_model() {
+        let model = ModelDef::cloze("My Cloze", vec!["Text", "Extra"]);
+
+        assert_eq!(model.name, "My Cloze");
+        assert_eq!(model.fields, vec!["Text", "Extra"]);
+        assert!(model.is_cloze());
+        assert_eq!(model.model_type, Some("cloze".to_string()));
+        assert_eq!(model.templates.len(), 1);
+        assert_eq!(model.templates[0].name, "Cloze");
+        assert!(model.templates[0].front.contains("{{cloze:Text}}"));
+    }
+
+    #[test]
+    fn test_standard_model_is_not_cloze() {
+        let model = ModelDef {
+            name: "Basic".to_string(),
+            fields: vec!["Front".to_string(), "Back".to_string()],
+            templates: vec![],
+            css: None,
+            sort_field: None,
+            id: None,
+            markdown_fields: vec![],
+            model_type: None,
+        };
+
+        assert!(!model.is_cloze());
+    }
+
+    #[test]
+    fn test_parse_cloze_model_from_toml() {
+        let toml = r#"
+[package]
+name = "Cloze Test"
+
+[[models]]
+name = "My Cloze"
+model_type = "cloze"
+fields = ["Text", "Extra"]
+
+[[models.templates]]
+name = "Cloze"
+front = "{{cloze:Text}}"
+back = "{{cloze:Text}}<br>{{Extra}}"
+
+[[decks]]
+name = "Cloze Test"
+"#;
+
+        let def = DeckDefinition::parse(toml).unwrap();
+        assert!(def.models[0].is_cloze());
     }
 }

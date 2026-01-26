@@ -287,6 +287,14 @@ struct SetEaseParams {
     ease_factors: Vec<i64>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SetDueDateParams {
+    /// Card IDs to set due date for
+    card_ids: Vec<i64>,
+    /// Days specification: "0" (today), "1" (tomorrow), "-1" (yesterday), "1-7" (random range), "0!" (today and reset interval)
+    days: String,
+}
+
 // Tag operation params
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct AddTagsParams {
@@ -852,6 +860,31 @@ impl AnkiServer {
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Set ease for {} of {} cards",
             success_count,
+            params.card_ids.len()
+        ))]))
+    }
+
+    #[tool(
+        description = "Set due date for cards. Days can be: '0' (today), '1' (tomorrow), '-1' (yesterday), '1-7' (random range), '0!' (today and reset interval)."
+    )]
+    async fn set_due_date(
+        &self,
+        Parameters(params): Parameters<SetDueDateParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.check_write("set_due_date")?;
+        debug!(count = params.card_ids.len(), days = %params.days, "Setting due date");
+
+        self.engine
+            .client()
+            .cards()
+            .set_due_date(&params.card_ids, &params.days)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        info!(count = params.card_ids.len(), days = %params.days, "Due date set");
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Set due date to '{}' for {} cards",
+            params.days,
             params.card_ids.len()
         ))]))
     }
