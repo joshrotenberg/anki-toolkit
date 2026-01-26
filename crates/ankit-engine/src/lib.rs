@@ -42,8 +42,10 @@
 //! - `enrich` - Find and update notes with empty fields
 //! - `deduplicate` - Duplicate detection and removal
 //! - `backup` - Deck backup and restore to .apkg files
+//! - `search` - Content search helpers (always enabled)
 
 mod error;
+pub mod search;
 
 #[cfg(feature = "analyze")]
 pub mod analyze;
@@ -114,6 +116,8 @@ use deduplicate::DeduplicateEngine;
 
 #[cfg(feature = "backup")]
 use backup::BackupEngine;
+
+use search::SearchEngine;
 
 /// High-level workflow engine for Anki operations.
 ///
@@ -245,6 +249,30 @@ impl Engine {
     #[cfg(feature = "backup")]
     pub fn backup(&self) -> BackupEngine<'_> {
         BackupEngine::new(&self.client)
+    }
+
+    /// Access content search helpers.
+    ///
+    /// Provides simplified search methods that return full note info
+    /// instead of just IDs, abstracting away Anki query syntax.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit_engine::Engine;
+    /// # async fn example() -> ankit_engine::Result<()> {
+    /// let engine = Engine::new();
+    ///
+    /// // Search for text in any field
+    /// let notes = engine.search().text("conjugation", Some("Japanese")).await?;
+    ///
+    /// // Search in a specific field
+    /// let notes = engine.search().field("Front", "hello", None).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn search(&self) -> SearchEngine<'_> {
+        SearchEngine::new(&self.client)
     }
 }
 
