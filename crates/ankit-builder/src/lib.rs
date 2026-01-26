@@ -88,6 +88,9 @@ mod diff;
 #[cfg(feature = "connect")]
 mod export;
 
+#[cfg(feature = "connect")]
+mod sync;
+
 pub use error::{Error, Result};
 pub use schema::{DeckDef, DeckDefinition, MediaDef, ModelDef, NoteDef, PackageInfo, TemplateDef};
 
@@ -102,6 +105,12 @@ pub use diff::{DeckDiff, FieldChange, ModifiedNote, NoteDiff, TagChanges};
 
 #[cfg(feature = "connect")]
 pub use export::DeckExporter;
+
+#[cfg(feature = "connect")]
+pub use sync::{
+    ConflictResolution, ResolvedConflict, SyncConflict, SyncError, SyncNote, SyncPlan, SyncResult,
+    SyncStrategy, SyncedNote,
+};
 
 /// Unified builder that can output to either .apkg or AnkiConnect.
 ///
@@ -434,6 +443,110 @@ impl DeckBuilder {
     pub async fn diff_connect_with_client(&self, client: &ankit::AnkiClient) -> Result<DeckDiff> {
         let differ = diff::DeckDiffer::new(client, &self.definition);
         differ.diff().await
+    }
+
+    /// Plan what sync would do without executing it.
+    ///
+    /// Returns a [`SyncPlan`] showing:
+    /// - Notes that would be pushed from TOML to Anki
+    /// - Notes that would be pulled from Anki to TOML
+    /// - Notes that have conflicts (modified in both places)
+    /// - Count of unchanged notes
+    ///
+    /// Use this to preview sync changes before applying them with [`sync()`](Self::sync).
+    ///
+    /// # Requirements
+    ///
+    /// - Anki must be running with the AnkiConnect add-on installed
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit_builder::DeckBuilder;
+    ///
+    /// # async fn example() -> ankit_builder::Result<()> {
+    /// let builder = DeckBuilder::from_file("deck.toml")?;
+    /// let plan = builder.plan_sync().await?;
+    ///
+    /// println!("Would push: {} notes", plan.to_push.len());
+    /// println!("Would pull: {} notes", plan.to_pull.len());
+    /// println!("Conflicts: {} notes", plan.conflicts.len());
+    /// println!("Unchanged: {} notes", plan.unchanged);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "connect")]
+    pub async fn plan_sync(&self) -> Result<SyncPlan> {
+        let client = ankit::AnkiClient::new();
+        self.plan_sync_with_client(&client).await
+    }
+
+    /// Plan sync using a custom client.
+    ///
+    /// Like [`plan_sync()`](Self::plan_sync) but allows using a custom
+    /// [`AnkiClient`](ankit::AnkiClient) with non-default settings.
+    #[cfg(feature = "connect")]
+    pub async fn plan_sync_with_client(&self, client: &ankit::AnkiClient) -> Result<SyncPlan> {
+        let syncer = sync::DeckSyncer::new(client, self.definition.clone());
+        syncer.plan().await
+    }
+
+    /// Execute bidirectional sync with Anki.
+    ///
+    /// Synchronizes the TOML definition with Anki according to the given strategy:
+    /// - Pushes new notes from TOML to Anki (if `push_new_notes` is true)
+    /// - Pulls new notes from Anki to TOML (if `pull_new_notes` is true)
+    /// - Resolves conflicts according to the conflict resolution strategy
+    ///
+    /// Returns a [`SyncResult`] containing:
+    /// - Notes that were pushed to Anki
+    /// - Notes that were pulled (available in `updated_definition`)
+    /// - Conflicts that were resolved or skipped
+    /// - Any errors that occurred
+    ///
+    /// # Requirements
+    ///
+    /// - Anki must be running with the AnkiConnect add-on installed
+    /// - Note types (models) must exist in Anki for pushing new notes
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ankit_builder::{DeckBuilder, SyncStrategy};
+    ///
+    /// # async fn example() -> ankit_builder::Result<()> {
+    /// let builder = DeckBuilder::from_file("deck.toml")?;
+    ///
+    /// // Push-only sync (TOML -> Anki)
+    /// let result = builder.sync(SyncStrategy::push_only()).await?;
+    /// println!("Pushed {} notes", result.pushed.len());
+    ///
+    /// // Pull-only sync (Anki -> TOML)
+    /// let result = builder.sync(SyncStrategy::pull_only()).await?;
+    /// if let Some(updated_def) = result.updated_definition {
+    ///     updated_def.write_toml("deck_updated.toml")?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "connect")]
+    pub async fn sync(&self, strategy: SyncStrategy) -> Result<SyncResult> {
+        let client = ankit::AnkiClient::new();
+        self.sync_with_client(&client, strategy).await
+    }
+
+    /// Execute sync using a custom client.
+    ///
+    /// Like [`sync()`](Self::sync) but allows using a custom
+    /// [`AnkiClient`](ankit::AnkiClient) with non-default settings.
+    #[cfg(feature = "connect")]
+    pub async fn sync_with_client(
+        &self,
+        client: &ankit::AnkiClient,
+        strategy: SyncStrategy,
+    ) -> Result<SyncResult> {
+        let syncer = sync::DeckSyncer::new(client, self.definition.clone());
+        syncer.sync(strategy).await
     }
 
     /// Export a deck from Anki to a [`DeckBuilder`].

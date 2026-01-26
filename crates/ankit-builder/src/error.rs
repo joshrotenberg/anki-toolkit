@@ -68,4 +68,9 @@ pub enum Error {
     #[cfg(feature = "connect")]
     #[error("AnkiConnect error: {0}")]
     AnkiConnect(#[from] ankit::Error),
+
+    /// Sync conflict error (connect feature).
+    #[cfg(feature = "connect")]
+    #[error("sync conflict: {0}")]
+    SyncConflict(String),
 }
