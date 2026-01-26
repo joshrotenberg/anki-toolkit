@@ -23,7 +23,11 @@ The `ankit-mcp` server lets AI assistants (like Claude) manage your Anki decks d
 ### Installation
 
 ```bash
+# From crates.io
 cargo install ankit-mcp
+
+# Or using Docker
+docker pull ghcr.io/joshrotenberg/ankit-mcp:latest
 ```
 
 ### Important: Data Safety

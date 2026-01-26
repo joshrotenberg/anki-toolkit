@@ -16,6 +16,37 @@ cd anki-toolkit
 cargo install --path crates/ankit-mcp
 ```
 
+### Using Docker
+
+If you don't have Rust installed, you can use the Docker image:
+
+```bash
+# Pull the image
+docker pull ghcr.io/joshrotenberg/ankit-mcp:latest
+
+# Run with stdio transport (for Claude Desktop)
+docker run -it --rm ghcr.io/joshrotenberg/ankit-mcp
+
+# Run with HTTP transport
+docker run -it --rm -p 3000:3000 ghcr.io/joshrotenberg/ankit-mcp --transport http --http-host 0.0.0.0
+```
+
+#### Connecting to Anki on the Host
+
+The MCP server needs to reach AnkiConnect running on your host machine:
+
+**Linux:**
+```bash
+docker run -it --rm --network host ghcr.io/joshrotenberg/ankit-mcp
+```
+
+**macOS/Windows:**
+```bash
+docker run -it --rm ghcr.io/joshrotenberg/ankit-mcp --host host.docker.internal
+```
+
+See [Claude Desktop Setup](claude-desktop-setup.md) for Docker configuration examples.
+
 ## Installing AnkiConnect
 
 AnkiConnect is required for the MCP server to communicate with Anki.
