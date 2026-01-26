@@ -389,3 +389,134 @@ async fn test_find_and_replace() {
     let result = client.models().find_and_replace(params).await.unwrap();
     assert_eq!(result, 5);
 }
+
+#[tokio::test]
+async fn test_find_models_by_id() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "findModelsById",
+        mock_anki_response(vec![serde_json::json!({
+            "id": 1234567890,
+            "name": "Basic",
+            "flds": [{"name": "Front"}, {"name": "Back"}]
+        })]),
+    )
+    .await;
+
+    let result = client.models().find_by_id(&[1234567890]).await.unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0]["name"], "Basic");
+}
+
+#[tokio::test]
+async fn test_find_models_by_name() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "findModelsByName",
+        mock_anki_response(vec![serde_json::json!({
+            "id": 1234567890,
+            "name": "Basic",
+            "flds": [{"name": "Front"}, {"name": "Back"}]
+        })]),
+    )
+    .await;
+
+    let result = client.models().find_by_name(&["Basic*"]).await.unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0]["name"], "Basic");
+}
+
+#[tokio::test]
+async fn test_rename_template() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "modelTemplateRename",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let result = client
+        .models()
+        .rename_template("Basic", "Card 1", "Front to Back")
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_reposition_template() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "modelTemplateReposition",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let result = client
+        .models()
+        .reposition_template("Basic (and reversed)", "Card 2", 0)
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_add_template() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "modelTemplateAdd",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let result = client
+        .models()
+        .add_template("Basic", "Reverse", "{{Back}}", "{{FrontSide}}<hr>{{Front}}")
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_remove_template() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "modelTemplateRemove",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let result = client.models().remove_template("Basic", "Reverse").await;
+
+    assert!(result.is_ok());
+}

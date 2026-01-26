@@ -273,3 +273,71 @@ async fn test_gui_current_card_with_data() {
     assert_eq!(card.card_id, 1234567890);
     assert_eq!(card.deck_name, "Default");
 }
+
+#[tokio::test]
+async fn test_gui_select_card() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(&server, "guiSelectCard", mock_anki_response(true)).await;
+
+    let result = client.gui().select_card(1234567890).await.unwrap();
+    assert!(result);
+}
+
+#[tokio::test]
+async fn test_gui_add_note_set_data() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "guiAddNoteSetData",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let mut fields = std::collections::HashMap::new();
+    fields.insert("Front", "Question");
+    fields.insert("Back", "Answer");
+
+    let result = client
+        .gui()
+        .add_note_set_data("Default", "Basic", fields, Some(&["tag1", "tag2"]))
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_gui_play_audio() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(
+        &server,
+        "guiPlayAudio",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let result = client.gui().play_audio("question").await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_gui_active_profile() {
+    let server = setup_mock_server().await;
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    mock_action(&server, "getActiveProfile", mock_anki_response("User 1")).await;
+
+    let result = client.gui().active_profile().await.unwrap();
+    assert_eq!(result, "User 1");
+}

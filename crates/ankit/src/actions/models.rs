@@ -101,6 +101,59 @@ struct SetFieldDescriptionParams<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct FindModelsByIdParams<'a> {
+    model_ids: &'a [i64],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FindModelsByNameParams<'a> {
+    model_names: &'a [&'a str],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateRenameParams<'a> {
+    model_name: &'a str,
+    old_template_name: &'a str,
+    new_template_name: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateRepositionParams<'a> {
+    model_name: &'a str,
+    template_name: &'a str,
+    index: i32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateAddParams<'a> {
+    model_name: &'a str,
+    template: TemplateAddInner<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateAddInner<'a> {
+    #[serde(rename = "Name")]
+    name: &'a str,
+    #[serde(rename = "Front")]
+    front: &'a str,
+    #[serde(rename = "Back")]
+    back: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateRemoveParams<'a> {
+    model_name: &'a str,
+    template_name: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct UpdateStylingParams<'a> {
     model: UpdateStylingModel<'a>,
 }
@@ -425,6 +478,140 @@ impl<'a> ModelActions<'a> {
                     model_name,
                     field_name,
                     description,
+                },
+            )
+            .await
+    }
+
+    /// Find models by their IDs.
+    ///
+    /// Returns full model information for each ID.
+    pub async fn find_by_id(&self, model_ids: &[i64]) -> Result<Vec<serde_json::Value>> {
+        self.client
+            .invoke("findModelsById", FindModelsByIdParams { model_ids })
+            .await
+    }
+
+    /// Find models by name patterns.
+    ///
+    /// Supports wildcards: `*` matches any sequence, `_` matches any single character.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit::AnkiClient;
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    /// let models = client.models().find_by_name(&["Basic*"]).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn find_by_name(&self, model_names: &[&str]) -> Result<Vec<serde_json::Value>> {
+        self.client
+            .invoke("findModelsByName", FindModelsByNameParams { model_names })
+            .await
+    }
+
+    /// Rename a card template.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit::AnkiClient;
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    /// client.models().rename_template("Basic", "Card 1", "Front to Back").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn rename_template(
+        &self,
+        model_name: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<()> {
+        self.client
+            .invoke_void(
+                "modelTemplateRename",
+                TemplateRenameParams {
+                    model_name,
+                    old_template_name: old_name,
+                    new_template_name: new_name,
+                },
+            )
+            .await
+    }
+
+    /// Reposition a card template within a model.
+    ///
+    /// The index is 0-based.
+    pub async fn reposition_template(
+        &self,
+        model_name: &str,
+        template_name: &str,
+        index: i32,
+    ) -> Result<()> {
+        self.client
+            .invoke_void(
+                "modelTemplateReposition",
+                TemplateRepositionParams {
+                    model_name,
+                    template_name,
+                    index,
+                },
+            )
+            .await
+    }
+
+    /// Add a new card template to a model.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ankit::AnkiClient;
+    /// # async fn example() -> ankit::Result<()> {
+    /// let client = AnkiClient::new();
+    /// client.models().add_template(
+    ///     "Basic",
+    ///     "Reverse",
+    ///     "{{Back}}",
+    ///     "{{FrontSide}}<hr>{{Front}}"
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn add_template(
+        &self,
+        model_name: &str,
+        template_name: &str,
+        front: &str,
+        back: &str,
+    ) -> Result<()> {
+        self.client
+            .invoke_void(
+                "modelTemplateAdd",
+                TemplateAddParams {
+                    model_name,
+                    template: TemplateAddInner {
+                        name: template_name,
+                        front,
+                        back,
+                    },
+                },
+            )
+            .await
+    }
+
+    /// Remove a card template from a model.
+    ///
+    /// Note: A model must have at least one template.
+    pub async fn remove_template(&self, model_name: &str, template_name: &str) -> Result<()> {
+        self.client
+            .invoke_void(
+                "modelTemplateRemove",
+                TemplateRemoveParams {
+                    model_name,
+                    template_name,
                 },
             )
             .await

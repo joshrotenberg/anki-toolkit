@@ -405,3 +405,120 @@ async fn test_remove_empty_notes() {
 
     assert!(result.is_ok());
 }
+
+#[tokio::test]
+async fn test_update_note() {
+    let server = setup_mock_server().await;
+    mock_action(
+        &server,
+        "updateNote",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    let mut fields = std::collections::HashMap::new();
+    fields.insert("Front".to_string(), "Updated front".to_string());
+
+    let tags = vec!["updated".to_string()];
+
+    let result = client
+        .notes()
+        .update(1234567890, Some(&fields), Some(&tags))
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_update_note_fields_only() {
+    let server = setup_mock_server().await;
+    mock_action(
+        &server,
+        "updateNote",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    let mut fields = std::collections::HashMap::new();
+    fields.insert("Front".to_string(), "Updated front".to_string());
+
+    let result = client.notes().update(1234567890, Some(&fields), None).await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_update_note_model() {
+    let server = setup_mock_server().await;
+    mock_action(
+        &server,
+        "updateNoteModel",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    let mut field_map = std::collections::HashMap::new();
+    field_map.insert("Front".to_string(), "Question".to_string());
+    field_map.insert("Back".to_string(), "Answer".to_string());
+
+    let result = client
+        .notes()
+        .update_model(1234567890, "New Model", Some(&field_map))
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_set_tags() {
+    let server = setup_mock_server().await;
+    mock_action(
+        &server,
+        "updateNoteTags",
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": null,
+            "error": null
+        })),
+    )
+    .await;
+
+    let client = AnkiClient::builder().url(server.uri()).build();
+
+    let new_tags = vec!["vocabulary".to_string(), "chapter1".to_string()];
+    let result = client.notes().set_tags(1234567890, &new_tags).await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_all_tags() {
+    let server = setup_mock_server().await;
+    mock_action(
+        &server,
+        "getTags",
+        mock_anki_response(vec!["tag1", "tag2", "vocabulary", "grammar"]),
+    )
+    .await;
+
+    let client = AnkiClient::builder().url(server.uri()).build();
+    let tags = client.notes().all_tags().await.unwrap();
+
+    assert_eq!(tags.len(), 4);
+    assert!(tags.contains(&"vocabulary".to_string()));
+    assert!(tags.contains(&"grammar".to_string()));
+}
