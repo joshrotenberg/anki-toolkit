@@ -45,7 +45,7 @@ pub fn list_decks(state: Arc<AnkiState>) -> Tool {
     ToolBuilder::new("list_decks")
         .description("List all deck names in Anki.")
         .read_only()
-        .handler_with_state_no_params(state, |state: Arc<AnkiState>| async move {
+        .handler_no_params_with_state(state, |state: Arc<AnkiState>| async move {
             debug!("Listing decks");
 
             let decks = state

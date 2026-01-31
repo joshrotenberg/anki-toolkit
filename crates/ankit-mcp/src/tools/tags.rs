@@ -126,7 +126,7 @@ pub fn replace_tags_all(state: Arc<AnkiState>) -> Tool {
 pub fn clear_unused_tags(state: Arc<AnkiState>) -> Tool {
     ToolBuilder::new("clear_unused_tags")
         .description("Remove all tags that are not used by any notes.")
-        .handler_with_state_no_params(state, |state: Arc<AnkiState>| async move {
+        .handler_no_params_with_state(state, |state: Arc<AnkiState>| async move {
             state.check_write("clear_unused_tags")?;
             debug!("Clearing unused tags");
 

@@ -12,7 +12,7 @@ pub fn version(state: Arc<AnkiState>) -> Tool {
     ToolBuilder::new("version")
         .description("Get the AnkiConnect version. Useful for checking if Anki is running.")
         .read_only()
-        .handler_with_state_no_params(state, |state: Arc<AnkiState>| async move {
+        .handler_no_params_with_state(state, |state: Arc<AnkiState>| async move {
             debug!("Getting AnkiConnect version");
 
             let version = state
@@ -35,7 +35,7 @@ pub fn version(state: Arc<AnkiState>) -> Tool {
 pub fn sync(state: Arc<AnkiState>) -> Tool {
     ToolBuilder::new("sync")
         .description("Sync the Anki collection with AnkiWeb.")
-        .handler_with_state_no_params(state, |state: Arc<AnkiState>| async move {
+        .handler_no_params_with_state(state, |state: Arc<AnkiState>| async move {
             state.check_write("sync")?;
             debug!("Syncing with AnkiWeb");
 

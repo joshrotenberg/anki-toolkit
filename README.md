@@ -2,6 +2,9 @@
 
 A comprehensive Rust toolkit for Anki deck management via AnkiConnect.
 
+[![CI](https://github.com/joshrotenberg/anki-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/joshrotenberg/anki-toolkit/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/ankit.svg)](https://crates.io/crates/ankit)
+[![docs.rs](https://docs.rs/ankit/badge.svg)](https://docs.rs/ankit)
 [![License](https://img.shields.io/crates/l/ankit.svg)](https://github.com/joshrotenberg/ankit#license)
 
 ## Overview
@@ -10,7 +13,7 @@ ankit provides tools for managing Anki flashcard decks programmatically. Whether
 
 ### Key Features
 
-- **50 MCP tools** for AI assistant integration (Claude, etc.)
+- **55 MCP tools** for AI assistant integration (Claude, etc.)
 - **Complete AnkiConnect API** coverage with async Rust client
 - **TOML-based deck definitions** with .apkg generation
 - **High-level workflows**: bulk import, deduplication, analysis, media management
@@ -68,19 +71,25 @@ Once configured, ask Claude to:
 - **Deck health**: "Give me a health report on my medical terminology deck"
 - **Media management**: "Find orphaned media files in my collection"
 
-### Available Tools (50 total)
+### Available Tools (55 total)
 
 | Category | Tools |
 |----------|-------|
 | Notes | add, find, get info, update, delete |
-| Cards | find, get info, suspend, unsuspend, forget, set ease |
-| Tags | add, remove, replace, bulk operations |
+| Cards | find, get info, suspend, unsuspend, forget, set ease, set due date |
+| Tags | add, remove, replace all, clear unused |
 | Decks | list, create, delete, clone, merge |
-| Analysis | study summary, retention stats, find leeches, deck health |
-| Import/Export | bulk import, export to JSON/TOML, review history |
+| Models | list models, get model fields |
+| Analysis | study summary, retention stats, find problems |
+| Progress | reset deck, tag by performance, suspend by criteria, deck health, bulk tag |
+| Import/Export | import notes, validate notes, export deck, export reviews |
 | Deduplication | find duplicates, preview, remove |
-| Media | audit, cleanup orphaned files |
-| TOML Builder | import, export, diff, sync (bidirectional) |
+| Enrichment | find candidates, enrich note, enrich notes |
+| Media | audit, cleanup |
+| Backup | backup deck, backup collection, restore deck, list backups |
+| Organization | move by tag |
+| TOML Sync | export, diff, plan sync, sync, import |
+| Misc | version, sync with AnkiWeb |
 
 ## For Developers: Rust Crates
 

@@ -20,7 +20,7 @@ pub fn audit_media(state: Arc<AnkiState>) -> Tool {
     ToolBuilder::new("audit_media")
         .description("Audit media files to find orphaned files and missing references.")
         .read_only()
-        .handler_with_state_no_params(state, |state: Arc<AnkiState>| async move {
+        .handler_no_params_with_state(state, |state: Arc<AnkiState>| async move {
             debug!("Auditing media");
 
             let audit = state

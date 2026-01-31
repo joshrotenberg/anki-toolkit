@@ -20,7 +20,7 @@ pub fn list_models(state: Arc<AnkiState>) -> Tool {
     ToolBuilder::new("list_models")
         .description("List all note type (model) names in Anki.")
         .read_only()
-        .handler_with_state_no_params(state, |state: Arc<AnkiState>| async move {
+        .handler_no_params_with_state(state, |state: Arc<AnkiState>| async move {
             debug!("Listing models");
 
             let models = state
