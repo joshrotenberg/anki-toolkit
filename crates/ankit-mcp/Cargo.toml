@@ -16,7 +16,7 @@ path = "src/main.rs"
 [dependencies]
 ankit-engine.workspace = true
 ankit-builder = { workspace = true, features = ["connect"] }
-rmcp.workspace = true
+tower-mcp.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -24,4 +24,3 @@ schemars.workspace = true
 clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-axum = "0.8"
