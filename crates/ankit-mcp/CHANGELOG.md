@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/joshrotenberg/anki-toolkit/compare/ankit-mcp-v0.1.0...ankit-mcp-v0.1.1) - 2026-02-01
+
+### Other
+
+- *(mcp)* migrate from rmcp to tower-mcp ([#68](https://github.com/joshrotenberg/anki-toolkit/pull/68))
+- release v0.1.0 ([#12](https://github.com/joshrotenberg/anki-toolkit/pull/12))
+
 ## [0.1.0](https://github.com/joshrotenberg/anki-toolkit/releases/tag/ankit-mcp-v0.1.0) - 2026-01-26
 
 ### Added
