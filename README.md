@@ -2,7 +2,7 @@
 
 A comprehensive Rust toolkit for Anki deck management via AnkiConnect.
 
-[![CI](https://github.com/joshrotenberg/anki-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/joshrotenberg/anki-toolkit/actions/workflows/ci.yml)
+[![CI](https://github.com/joshrotenberg/ankit/actions/workflows/ci.yml/badge.svg)](https://github.com/joshrotenberg/ankit/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/ankit.svg)](https://crates.io/crates/ankit)
 [![docs.rs](https://docs.rs/ankit/badge.svg)](https://docs.rs/ankit)
 [![License](https://img.shields.io/crates/l/ankit.svg)](https://github.com/joshrotenberg/ankit#license)
